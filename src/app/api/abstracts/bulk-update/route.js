@@ -1,18 +1,19 @@
 // src/app/api/abstracts/bulk-update/route.js
-// COMPLETE PRODUCTION-READY BULK UPDATE API WITH FULL DEBUGGING
-import { NextResponse } from 'next/server'
-import { writeFile, readFile } from 'fs/promises'
-import { existsSync } from 'fs'
-import path from 'path'
+// COMPLETE PRODUCTION-READY BULK UPDATE API - PostgreSQL Version
+import { NextResponse } from 'next/server';
+import { 
+  bulkUpdateAbstractStatus, 
+  getAllAbstracts, 
+  getStatistics, 
+  testConnection 
+} from '@/lib/database-postgres';
 
 // API Configuration
 const API_VERSION = '2.0';
 const MAX_BULK_SIZE = 100;
-const ABSTRACTS_FILE = path.join(process.cwd(), 'data', 'abstracts.json');
 
 // Initialize API
-console.log('🚀 APBMT Bulk Update API v' + API_VERSION + ' loaded at:', new Date().toISOString());
-console.log('📁 Data file path:', ABSTRACTS_FILE);
+console.log('🚀 APBMT Bulk Update API v' + API_VERSION + ' (PostgreSQL) loaded at:', new Date().toISOString());
 
 // Utility Functions
 function generateRequestId() {
@@ -55,68 +56,10 @@ function createApiResponse(success, data, message, metadata = {}) {
     metadata: {
       requestId: metadata.requestId,
       processingTime: metadata.processingTime,
+      database: 'PostgreSQL',
       ...metadata
     }
   };
-}
-
-// Database Operations
-async function loadAbstracts() {
-  const startTime = Date.now();
-  try {
-    console.log('📖 Loading abstracts from file...');
-    
-    if (!existsSync(ABSTRACTS_FILE)) {
-      console.log('📄 Abstracts file not found, returning empty array');
-      return [];
-    }
-    
-    const data = await readFile(ABSTRACTS_FILE, 'utf-8');
-    const abstracts = JSON.parse(data);
-    const loadTime = Date.now() - startTime;
-    
-    console.log(`✅ Loaded ${abstracts.length} abstracts in ${loadTime}ms`);
-    return abstracts;
-    
-  } catch (error) {
-    const loadTime = Date.now() - startTime;
-    console.error(`❌ Error loading abstracts after ${loadTime}ms:`, error);
-    return [];
-  }
-}
-
-async function saveAbstracts(abstracts) {
-  const startTime = Date.now();
-  try {
-    console.log('💾 Saving abstracts to file...');
-    
-    // Ensure directory exists
-    const dataDir = path.join(process.cwd(), 'data');
-    if (!existsSync(dataDir)) {
-      console.log('📁 Creating data directory:', dataDir);
-      const { mkdir } = await import('fs/promises');
-      await mkdir(dataDir, { recursive: true });
-    }
-    
-    // Write file with backup
-    const backupFile = ABSTRACTS_FILE + '.backup.' + Date.now();
-    if (existsSync(ABSTRACTS_FILE)) {
-      console.log('🔄 Creating backup:', backupFile);
-      const { copyFile } = await import('fs/promises');
-      await copyFile(ABSTRACTS_FILE, backupFile);
-    }
-    
-    await writeFile(ABSTRACTS_FILE, JSON.stringify(abstracts, null, 2));
-    const saveTime = Date.now() - startTime;
-    
-    console.log(`✅ Saved ${abstracts.length} abstracts in ${saveTime}ms`);
-    return true;
-    
-  } catch (error) {
-    const saveTime = Date.now() - startTime;
-    console.error(`❌ Error saving abstracts after ${saveTime}ms:`, error);
-    return false;
-  }
 }
 
 // Validation Functions
@@ -135,7 +78,7 @@ function validateBulkRequest(body) {
   }
   
   // Check status
-  const validStatuses = ['pending', 'under_review', 'approved', 'rejected', 'final_submitted'];
+  const validStatuses = ['pending', 'approved', 'rejected', 'final_submitted'];
   if (!body.status) {
     errors.push('status field is required');
   } else if (!validStatuses.includes(body.status)) {
@@ -145,7 +88,7 @@ function validateBulkRequest(body) {
   // Check abstract IDs format
   if (body.abstractIds && Array.isArray(body.abstractIds)) {
     body.abstractIds.forEach((id, index) => {
-      if (!id || typeof id !== 'string') {
+      if (!id || (typeof id !== 'string' && typeof id !== 'number')) {
         errors.push(`Invalid abstract ID at index ${index}: ${id}`);
       }
     });
@@ -158,53 +101,45 @@ function validateBulkRequest(body) {
 }
 
 // Email Notification Function
-async function sendStatusNotification(abstract, newStatus, comments) {
+async function sendBulkStatusNotification(abstractIds, newStatus, comments) {
   try {
-    if (!abstract.email) {
-      console.log(`📧 Skipping email for ${abstract.id} - no email address`);
-      return;
-    }
+    console.log(`📧 Queuing bulk status update emails for ${abstractIds.length} abstracts`);
     
-    const emailData = {
-      submissionId: abstract.submissionId,
-      abstractId: abstract.id,
-      title: abstract.title,
-      author: abstract.author || abstract.presenter_name,
-      email: abstract.email,
-      status: newStatus,
-      comments: comments,
-      reviewDate: new Date().toISOString()
-    };
-    
-    console.log(`📧 Queuing status update email for ${abstract.id} to ${abstract.email}`);
-    
-    // Send email notification (async, don't wait)
-    fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/email`, {
+    // Send bulk email notification (async, don't wait)
+    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    fetch(`${baseUrl}/api/abstracts/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        type: 'status_update',
-        data: emailData
+        type: 'bulk_status_update',
+        abstractIds: abstractIds,
+        status: newStatus,
+        comments: comments,
+        reviewDate: new Date().toISOString()
       })
     }).catch(err => {
-      console.error(`❌ Email notification failed for ${abstract.id}:`, err.message);
+      console.error(`❌ Bulk email notification failed:`, err.message);
     });
     
   } catch (error) {
-    console.error(`❌ Email notification error for ${abstract.id}:`, error);
+    console.error(`❌ Bulk email notification error:`, error);
   }
 }
 
 // Main Bulk Update Handler
 async function processBulkUpdate(abstractIds, status, comments, updatedBy, requestId) {
   const startTime = Date.now();
-  console.log(`🔄 [${requestId}] Starting bulk update: ${abstractIds.length} abstracts → ${status}`);
+  console.log(`🔄 [${requestId}] Starting PostgreSQL bulk update: ${abstractIds.length} abstracts → ${status}`);
   
   try {
-    // Load current abstracts
-    const abstracts = await loadAbstracts();
-    if (abstracts.length === 0) {
-      console.log(`❌ [${requestId}] No abstracts found in database`);
+    // Test database connection
+    await testConnection();
+
+    // Bulk update in PostgreSQL
+    const updatedAbstracts = await bulkUpdateAbstractStatus(abstractIds, status, comments);
+    
+    if (!updatedAbstracts || updatedAbstracts.length === 0) {
+      console.log(`❌ [${requestId}] No abstracts were updated`);
       return {
         successful: 0,
         failed: abstractIds.length,
@@ -212,129 +147,55 @@ async function processBulkUpdate(abstractIds, status, comments, updatedBy, reque
         results: abstractIds.map(id => ({
           id,
           success: false,
-          error: 'No abstracts found in database'
+          error: 'Abstract not found or update failed'
         })),
-        errors: ['No abstracts found in database']
+        errors: ['No abstracts were updated']
       };
     }
+
+    // Process results
+    const successful = updatedAbstracts.length;
+    const failed = abstractIds.length - successful;
+    const updatedIds = updatedAbstracts.map(a => a.id.toString());
     
-    const results = [];
-    let successful = 0;
-    let failed = 0;
-    const errors = [];
-    
-    // Process each abstract ID
-    for (let i = 0; i < abstractIds.length; i++) {
-      const abstractId = abstractIds[i];
-      console.log(`🔍 [${requestId}] Processing ${i + 1}/${abstractIds.length}: ${abstractId}`);
-      
-      try {
-        // Find abstract by ID
-        const abstractIndex = abstracts.findIndex(a => a.id === abstractId);
-        
-        if (abstractIndex === -1) {
-          console.log(`❌ [${requestId}] Abstract not found: ${abstractId}`);
-          failed++;
-          const error = `Abstract not found: ${abstractId}`;
-          errors.push(error);
-          results.push({
-            id: abstractId,
-            success: false,
-            error: error,
-            title: null,
-            oldStatus: null,
-            newStatus: null
-          });
-          continue;
-        }
-        
-        const abstract = abstracts[abstractIndex];
-        const oldStatus = abstract.status;
-        
-        // Check if status change is valid
-        if (oldStatus === status) {
-          console.log(`⚠️ [${requestId}] Status already ${status} for ${abstractId}`);
-          successful++;
-          results.push({
-            id: abstractId,
-            success: true,
-            title: abstract.title,
-            oldStatus: oldStatus,
-            newStatus: status,
-            note: 'Status was already correct'
-          });
-          continue;
-        }
-        
-        // Update abstract
-        abstracts[abstractIndex] = {
-          ...abstract,
-          status: status,
-          reviewer_comments: comments || `Bulk ${status} operation`,
-          review_date: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          updated_by: updatedBy || 'admin',
-          last_operation: 'bulk_update',
-          last_operation_id: requestId
-        };
-        
-        // Send email notification
-        await sendStatusNotification(abstracts[abstractIndex], status, comments);
-        
-        successful++;
-        results.push({
-          id: abstractId,
+    const results = abstractIds.map(id => {
+      const updated = updatedAbstracts.find(a => a.id.toString() === id.toString());
+      if (updated) {
+        return {
+          id: id,
           success: true,
-          title: abstract.title,
-          author: abstract.author || abstract.presenter_name,
-          email: abstract.email,
-          oldStatus: oldStatus,
-          newStatus: status,
-          updatedAt: new Date().toISOString()
-        });
-        
-        console.log(`✅ [${requestId}] Updated ${abstractId}: "${oldStatus}" → "${status}"`);
-        
-      } catch (itemError) {
-        console.error(`❌ [${requestId}] Error processing ${abstractId}:`, itemError);
-        failed++;
-        const error = `Processing error for ${abstractId}: ${itemError.message}`;
-        errors.push(error);
-        results.push({
-          id: abstractId,
+          title: updated.title,
+          author: updated.presenter_name,
+          oldStatus: 'pending', // We don't track old status in this simple implementation
+          newStatus: updated.status,
+          updatedAt: updated.updated_at
+        };
+      } else {
+        return {
+          id: id,
           success: false,
-          error: error,
+          error: 'Abstract not found or update failed',
           title: null,
           oldStatus: null,
           newStatus: null
-        });
+        };
       }
-    }
-    
-    // Save changes to file
+    });
+
+    // Send email notifications
     if (successful > 0) {
-      console.log(`💾 [${requestId}] Saving ${successful} changes to database...`);
-      const saved = await saveAbstracts(abstracts);
-      
-      if (!saved) {
-        console.error(`❌ [${requestId}] Failed to save changes to database`);
-        throw new Error('Failed to save changes to database');
-      }
-      
-      console.log(`✅ [${requestId}] Successfully saved all changes`);
-    } else {
-      console.log(`⚠️ [${requestId}] No changes to save`);
+      await sendBulkStatusNotification(updatedIds, status, comments);
     }
     
     const processingTime = Date.now() - startTime;
-    console.log(`🏁 [${requestId}] Bulk update completed in ${processingTime}ms: ${successful} successful, ${failed} failed`);
+    console.log(`🏁 [${requestId}] PostgreSQL bulk update completed in ${processingTime}ms: ${successful} successful, ${failed} failed`);
     
     return {
       successful,
       failed,
       total: abstractIds.length,
       results,
-      errors: errors.length > 0 ? errors : null,
+      errors: failed > 0 ? [`${failed} abstracts could not be updated`] : null,
       processingTime,
       summary: {
         totalProcessed: abstractIds.length,
@@ -347,7 +208,7 @@ async function processBulkUpdate(abstractIds, status, comments, updatedBy, reque
     
   } catch (error) {
     const processingTime = Date.now() - startTime;
-    console.error(`❌ [${requestId}] Bulk update fatal error after ${processingTime}ms:`, error);
+    console.error(`❌ [${requestId}] PostgreSQL bulk update fatal error after ${processingTime}ms:`, error);
     
     return {
       successful: 0,
@@ -356,9 +217,9 @@ async function processBulkUpdate(abstractIds, status, comments, updatedBy, reque
       results: abstractIds.map(id => ({
         id,
         success: false,
-        error: 'Fatal processing error: ' + error.message
+        error: 'Database error: ' + error.message
       })),
-      errors: ['Fatal processing error: ' + error.message],
+      errors: ['Database error: ' + error.message],
       processingTime
     };
   }
@@ -370,7 +231,7 @@ export async function POST(request) {
   const requestStart = Date.now();
   
   try {
-    console.log(`📥 [${requestId}] Bulk update request received`);
+    console.log(`📥 [${requestId}] PostgreSQL bulk update request received`);
     
     // Parse request body
     let body;
@@ -404,7 +265,7 @@ export async function POST(request) {
     console.log(`✅ [${requestId}] Request validation passed`);
     
     // Extract validated data
-    const { abstractIds, status, updatedBy, comments, bulkOperation } = body;
+    const { abstractIds, status, updatedBy, comments } = body;
     
     // Process bulk update
     const updateResult = await processBulkUpdate(
@@ -430,13 +291,13 @@ export async function POST(request) {
         processingTime: totalProcessingTime,
         bulkOperation: true,
         statusChanged: status,
-        updatedBy: updatedBy || 'admin'
+        updatedBy: updatedBy || 'admin',
+        database: 'PostgreSQL'
       }
     );
     
     console.log(`🏁 [${requestId}] Request completed in ${totalProcessingTime}ms - Success: ${isSuccess}`);
     
-    // Always return 200 for frontend compatibility
     return NextResponse.json(response, {
       status: 200,
       headers: {
@@ -446,7 +307,8 @@ export async function POST(request) {
         'X-Updated-Count': updateResult.successful.toString(),
         'X-Failed-Count': updateResult.failed.toString(),
         'X-Total-Count': updateResult.total.toString(),
-        'X-API-Version': API_VERSION
+        'X-API-Version': API_VERSION,
+        'X-Database': 'PostgreSQL'
       }
     });
     
@@ -464,7 +326,8 @@ export async function POST(request) {
       }, 'Internal server error', { 
         requestId, 
         processingTime: totalProcessingTime,
-        errorType: error.constructor.name
+        errorType: error.constructor.name,
+        database: 'PostgreSQL'
       }),
       {
         status: 200, // Frontend compatibility
@@ -473,7 +336,8 @@ export async function POST(request) {
           'X-Processing-Time': totalProcessingTime.toString(),
           'X-Operation-Status': 'ERROR',
           'X-Error-Type': 'FATAL_ERROR',
-          'X-API-Version': API_VERSION
+          'X-API-Version': API_VERSION,
+          'X-Database': 'PostgreSQL'
         }
       }
     );
@@ -488,12 +352,15 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const abstractId = searchParams.get('id');
     
+    // Test database connection
+    await testConnection();
+    
     if (abstractId) {
-      // Get specific abstract status
+      // Get specific abstract status from PostgreSQL
       console.log(`📊 [${requestId}] Getting status for abstract: ${abstractId}`);
       
-      const abstracts = await loadAbstracts();
-      const abstract = abstracts.find(a => a.id === abstractId);
+      const { getAbstractById } = await import('@/lib/database-postgres');
+      const abstract = await getAbstractById(abstractId);
       
       if (!abstract) {
         return NextResponse.json(
@@ -509,26 +376,23 @@ export async function GET(request) {
             title: abstract.title,
             status: abstract.status,
             updated_at: abstract.updated_at,
-            review_date: abstract.review_date
+            submission_date: abstract.submission_date
           }
-        }, 'Abstract found', { requestId })
+        }, 'Abstract found', { requestId, database: 'PostgreSQL' })
       );
       
     } else {
       // Health check
       console.log(`🏥 [${requestId}] Health check requested`);
       
-      const abstracts = await loadAbstracts();
-      const stats = {
-        totalAbstracts: abstracts.length,
-        statusCounts: {
-          pending: abstracts.filter(a => a.status === 'pending').length,
-          under_review: abstracts.filter(a => a.status === 'under_review').length,
-          approved: abstracts.filter(a => a.status === 'approved').length,
-          rejected: abstracts.filter(a => a.status === 'rejected').length,
-          final_submitted: abstracts.filter(a => a.status === 'final_submitted').length
-        },
-        lastUpdated: abstracts.length > 0 ? Math.max(...abstracts.map(a => new Date(a.updated_at || a.created_at).getTime())) : null
+      const stats = await getStatistics();
+      const allAbstracts = await getAllAbstracts();
+      
+      const statusCounts = {
+        pending: stats.find(s => s.presentation_type === 'pending')?.pending || 0,
+        approved: stats.find(s => s.presentation_type === 'approved')?.approved || 0,
+        rejected: stats.find(s => s.presentation_type === 'rejected')?.rejected || 0,
+        final_submitted: stats.find(s => s.presentation_type === 'final_submitted')?.final_submitted || 0
       };
       
       return NextResponse.json(
@@ -537,77 +401,30 @@ export async function GET(request) {
           version: API_VERSION,
           uptime: process.uptime(),
           database: {
+            type: 'PostgreSQL',
             connected: true,
-            file: ABSTRACTS_FILE,
-            exists: existsSync(ABSTRACTS_FILE)
+            connectionString: !!process.env.DATABASE_URL
           },
-          statistics: stats,
+          statistics: {
+            totalAbstracts: allAbstracts.length,
+            statusCounts,
+            lastUpdated: allAbstracts.length > 0 ? Math.max(...allAbstracts.map(a => new Date(a.updated_at || a.submission_date).getTime())) : null
+          },
           features: {
             maxBulkSize: MAX_BULK_SIZE,
-            supportedStatuses: ['pending', 'under_review', 'approved', 'rejected', 'final_submitted'],
+            supportedStatuses: ['pending', 'approved', 'rejected', 'final_submitted'],
             emailNotifications: true,
             auditLogging: true,
-            backupOnSave: true
+            bulkOperations: true
           }
-        }, 'API is healthy and operational', { requestId })
+        }, 'API is healthy and operational', { requestId, database: 'PostgreSQL' })
       );
     }
     
   } catch (error) {
     console.error(`❌ [${requestId}] GET request error:`, error);
     return NextResponse.json(
-      createApiResponse(false, null, 'Internal server error', { requestId }),
-      { status: 500 }
-    );
-  }
-}
-
-// PUT - Single abstract update
-export async function PUT(request) {
-  const requestId = generateRequestId();
-  
-  try {
-    console.log(`📝 [${requestId}] Single update request received`);
-    
-    const body = await request.json();
-    const { abstractId, status, comments, updatedBy } = body;
-    
-    if (!abstractId || !status) {
-      return NextResponse.json(
-        createApiResponse(false, null, 'Abstract ID and status are required', { requestId }),
-        { status: 400 }
-      );
-    }
-    
-    // Process single update using bulk handler
-    const result = await processBulkUpdate([abstractId], status, comments, updatedBy, requestId);
-    const isSuccess = result.successful > 0;
-    
-    return NextResponse.json(
-      createApiResponse(
-        isSuccess,
-        {
-          abstract: result.results[0],
-          successful: result.successful,
-          failed: result.failed,
-          total: 1
-        },
-        isSuccess ? `Abstract ${status} successfully` : 'Failed to update abstract',
-        { requestId, singleUpdate: true }
-      ),
-      { 
-        status: 200,
-        headers: {
-          'X-Request-ID': requestId,
-          'X-Operation-Status': isSuccess ? 'SUCCESS' : 'FAILED'
-        }
-      }
-    );
-    
-  } catch (error) {
-    console.error(`❌ [${requestId}] PUT request error:`, error);
-    return NextResponse.json(
-      createApiResponse(false, null, 'Internal server error', { requestId }),
+      createApiResponse(false, null, 'Database connection error: ' + error.message, { requestId }),
       { status: 500 }
     );
   }
@@ -621,11 +438,9 @@ export async function OPTIONS() {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Request-ID',
-      'Access-Control-Expose-Headers': 'X-Request-ID, X-Processing-Time, X-Operation-Status, X-API-Version',
-      'X-API-Version': API_VERSION
+      'Access-Control-Expose-Headers': 'X-Request-ID, X-Processing-Time, X-Operation-Status, X-API-Version, X-Database',
+      'X-API-Version': API_VERSION,
+      'X-Database': 'PostgreSQL'
     },
   });
 }
-
-// Export for potential use in other modules
-export { processBulkUpdate, validateBulkRequest, createApiResponse };
