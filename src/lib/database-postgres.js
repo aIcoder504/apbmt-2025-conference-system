@@ -69,6 +69,20 @@ export async function createUser(userData) {
   }
 }
 
+export async function getUserByEmail(email) {
+  const client = await pool.connect();
+  
+  try {
+    const result = await client.query('SELECT * FROM users WHERE email = $1', [email]);
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('❌ Get user error:', error);
+    return null;
+  } finally {
+    client.release();
+  }
+}
+
 // Test database connection
 export async function testConnection() {
   try {
