@@ -1,15 +1,11 @@
 // src/app/api/abstracts/final-upload/route.js
-// STEP 2A: Final Upload API for Post-Approval Workflow
+// Final Upload API for Post-Approval Workflow - PostgreSQL Version
 
 import { NextResponse } from 'next/server';
-import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { writeFile, mkdir } from 'fs/promises';
-
-// Initialize database connection
-const dbPath = path.join(process.cwd(), 'database.sqlite');
-const db = new Database(dbPath);
+import { getAbstractById, updateAbstract, testConnection } from '@/lib/database-postgres';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'final');
@@ -17,6 +13,9 @@ const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'final');
 // POST - Handle final file upload
 export async function POST(request) {
   try {
+    // Test database connection
+    await testConnection();
+
     const formData = await request.formData();
     const file = formData.get('file');
     const abstractId = formData.get('abstractId');
@@ -34,22 +33,24 @@ export async function POST(request) {
     }
 
     // Check if abstract exists and is approved
-    const checkAbstractStmt = db.prepare(`
-      SELECT id, title, presenter_name, status, user_id 
-      FROM abstracts 
-      WHERE id = ? AND status = 'approved'
-    `);
-    const abstract = checkAbstractStmt.get(abstractId);
+    const abstract = await getAbstractById(abstractId);
 
     if (!abstract) {
       return NextResponse.json({
         success: false,
-        error: 'Abstract not found or not approved for final upload'
+        error: 'Abstract not found'
       }, { status: 404 });
     }
 
+    if (abstract.status !== 'approved') {
+      return NextResponse.json({
+        success: false,
+        error: 'Abstract not approved for final upload'
+      }, { status: 400 });
+    }
+
     // Verify user owns this abstract
-    if (abstract.user_id !== userId) {
+    if (abstract.user_id !== parseInt(userId)) {
       return NextResponse.json({
         success: false,
         error: 'Unauthorized: You can only upload files for your own abstracts'
@@ -100,30 +101,18 @@ export async function POST(request) {
     const buffer = Buffer.from(bytes);
     await writeFile(filePath, buffer);
 
-    // Update database with final file info
-    const updateStmt = db.prepare(`
-      UPDATE abstracts 
-      SET 
-        final_file_url = ?,
-        final_file_name = ?,
-        final_file_size = ?,
-        final_upload_date = ?,
-        status = 'final_submitted',
-        updated_at = ?
-      WHERE id = ?
-    `);
-
+    // Update database with final file info using PostgreSQL
     const currentTime = new Date().toISOString();
-    const result = updateStmt.run(
-      publicPath,
-      file.name,
-      file.size,
-      currentTime,
-      currentTime,
-      abstractId
-    );
+    const updateData = {
+      final_file_path: publicPath,
+      file_name: file.name,
+      file_size: file.size,
+      status: 'final_submitted'
+    };
 
-    if (result.changes > 0) {
+    const updatedAbstract = await updateAbstract(abstractId, updateData);
+
+    if (updatedAbstract) {
       // Log the upload
       console.log('✅ Final upload successful:', {
         abstractId,
@@ -171,6 +160,9 @@ export async function POST(request) {
 // GET - Get final upload status and file info
 export async function GET(request) {
   try {
+    // Test database connection
+    await testConnection();
+
     const { searchParams } = new URL(request.url);
     const abstractId = searchParams.get('abstractId');
     const userId = searchParams.get('userId');
@@ -182,22 +174,21 @@ export async function GET(request) {
       }, { status: 400 });
     }
 
-    const stmt = db.prepare(`
-      SELECT 
-        id, title, presenter_name, status, 
-        final_file_url, final_file_name, final_file_size, final_upload_date,
-        user_id
-      FROM abstracts 
-      WHERE id = ? AND user_id = ?
-    `);
-    
-    const abstract = stmt.get(abstractId, userId);
+    const abstract = await getAbstractById(abstractId);
 
     if (!abstract) {
       return NextResponse.json({
         success: false,
-        error: 'Abstract not found or unauthorized'
+        error: 'Abstract not found'
       }, { status: 404 });
+    }
+
+    // Verify user owns this abstract
+    if (abstract.user_id !== parseInt(userId)) {
+      return NextResponse.json({
+        success: false,
+        error: 'Unauthorized'
+      }, { status: 403 });
     }
 
     return NextResponse.json({
@@ -208,13 +199,13 @@ export async function GET(request) {
         presenter: abstract.presenter_name,
         status: abstract.status,
         finalFile: {
-          url: abstract.final_file_url,
-          name: abstract.final_file_name,
-          size: abstract.final_file_size,
-          uploadDate: abstract.final_upload_date
+          url: abstract.final_file_path,
+          name: abstract.file_name,
+          size: abstract.file_size,
+          uploadDate: abstract.updated_at
         },
         canUpload: abstract.status === 'approved',
-        hasUploaded: !!abstract.final_file_url
+        hasUploaded: !!abstract.final_file_path
       }
     });
 
@@ -231,6 +222,9 @@ export async function GET(request) {
 // DELETE - Remove final uploaded file (if needed for re-upload)
 export async function DELETE(request) {
   try {
+    // Test database connection
+    await testConnection();
+
     const { searchParams } = new URL(request.url);
     const abstractId = searchParams.get('abstractId');
     const userId = searchParams.get('userId');
@@ -242,23 +236,25 @@ export async function DELETE(request) {
       }, { status: 400 });
     }
 
-    // Get current file info
-    const stmt = db.prepare(`
-      SELECT final_file_url, user_id, status 
-      FROM abstracts 
-      WHERE id = ? AND user_id = ?
-    `);
-    
-    const abstract = stmt.get(abstractId, userId);
+    // Get current abstract info
+    const abstract = await getAbstractById(abstractId);
 
     if (!abstract) {
       return NextResponse.json({
         success: false,
-        error: 'Abstract not found or unauthorized'
+        error: 'Abstract not found'
       }, { status: 404 });
     }
 
-    if (!abstract.final_file_url) {
+    // Verify user owns this abstract
+    if (abstract.user_id !== parseInt(userId)) {
+      return NextResponse.json({
+        success: false,
+        error: 'Unauthorized'
+      }, { status: 403 });
+    }
+
+    if (!abstract.final_file_path) {
       return NextResponse.json({
         success: false,
         error: 'No file to delete'
@@ -266,7 +262,7 @@ export async function DELETE(request) {
     }
 
     // Remove file from filesystem
-    const fileName = path.basename(abstract.final_file_url);
+    const fileName = path.basename(abstract.final_file_path);
     const filePath = path.join(uploadsDir, fileName);
     
     try {
@@ -278,22 +274,14 @@ export async function DELETE(request) {
     }
 
     // Update database to remove file reference
-    const updateStmt = db.prepare(`
-      UPDATE abstracts 
-      SET 
-        final_file_url = NULL,
-        final_file_name = NULL,
-        final_file_size = NULL,
-        final_upload_date = NULL,
-        status = 'approved',
-        updated_at = ?
-      WHERE id = ?
-    `);
+    const updateData = {
+      final_file_path: null,
+      status: 'approved'
+    };
 
-    const currentTime = new Date().toISOString();
-    const result = updateStmt.run(currentTime, abstractId);
+    const updatedAbstract = await updateAbstract(abstractId, updateData);
 
-    if (result.changes > 0) {
+    if (updatedAbstract) {
       return NextResponse.json({
         success: true,
         message: 'Final file removed successfully',
