@@ -607,6 +607,83 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
         throw new Error(result.error || 'Update failed');
       }
 
+  // Individual status update with email
+  const handleIndividualStatusUpdate = async (abstract, newStatus) => {
+    const statusIcon = newStatus === 'approved' ? '✅' : '❌';
+    const statusText = newStatus.toUpperCase();
+
+    const confirmed = confirm(
+      `${statusIcon} ${statusText} Confirmation\n\n` +
+      `📝 Abstract: ${abstract.title}\n` +
+      `👤 Author: ${abstract.author}\n` +
+      `📧 Email: ${abstract.email}\n` +
+      `🔄 New Status: ${statusText}\n\n` +
+      `This will:\n` +
+      `• Update status in database\n` +
+      `• Send ${newStatus} email to presenter\n\n` +
+      `Continue?`
+    );
+
+    if (!confirmed) {
+      showToast(`❌ ${statusText} Cancelled\n\nNo changes made to "${abstract.title}"`, 'warning', 3000);
+      return;
+    }
+
+    try {
+      const loadingToast = showToast(
+        `🔄 Updating Abstract...\n\n` +
+        `📝 "${abstract.title}"\n` +
+        `🔄 Status: ${statusText}\n` +
+        `⏳ Please wait...`,
+        'info',
+        10000
+      );
+
+      const response = await fetch('/api/abstracts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: abstract.id, 
+          status: newStatus,
+          updatedBy: 'admin',
+          comments: `Individual ${newStatus} operation`
+        })
+      });
+
+      const result = await response.json();
+
+      if (document.body.contains(loadingToast)) {
+        document.body.removeChild(loadingToast);
+      }
+
+      if (result.success) {
+        let emailSent = false;
+        if (newStatus === 'approved') {
+          emailSent = await EmailIntegration.sendApprovalEmail(abstract);
+        } else if (newStatus === 'rejected') {
+          emailSent = await EmailIntegration.sendRejectionEmail(abstract, 'Individual review decision');
+        }
+
+        showToast(
+          `${statusIcon} ${statusText} Successful!\n\n` +
+          `📝 Abstract: "${abstract.title}"\n` +
+          `👤 Author: ${abstract.author}\n` +
+          `📧 Email: ${abstract.email}\n\n` +
+          `💾 Database: ✅ Updated\n` +
+          `📧 Email: ${emailSent ? '✅ Sent' : '❌ Failed'}\n\n` +
+          `🔄 Page will refresh in 2 seconds`,
+          'success',
+          8000
+        );
+
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+
+      } else {
+        throw new Error(result.error || 'Update failed');
+      }
+
     } catch (error) {
       console.error('Individual update error:', error);
       showToast(
