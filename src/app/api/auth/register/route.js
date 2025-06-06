@@ -1,5 +1,5 @@
 // src/app/api/auth/register/route.js
-// 🚀 COMPLETELY FIXED REGISTRATION API
+// 🚀 COMPLETELY FIXED REGISTRATION AP
 
 import bcrypt from 'bcryptjs';
 import { NextResponse } from 'next/server';
