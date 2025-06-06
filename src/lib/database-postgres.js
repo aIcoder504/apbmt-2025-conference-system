@@ -9,99 +9,46 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
-// Initialize database tables
-export async function initializeDatabase() {
-  const client = await pool.connect();
-  
-  try {
-    console.log('🔄 Initializing database tables...');
-    
-    // Users table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        full_name VARCHAR(255) NOT NULL,
-        institution VARCHAR(255),
-        phone VARCHAR(20),
-        registration_id VARCHAR(50),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Abstracts table  
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS abstracts (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        title TEXT NOT NULL,
-        presenter_name VARCHAR(255) NOT NULL,
-        institution_name VARCHAR(255),
-        presentation_type VARCHAR(50) NOT NULL,
-        abstract_content TEXT NOT NULL,
-        co_authors TEXT,
-        file_path VARCHAR(500),
-        file_name VARCHAR(255),
-        file_size INTEGER,
-        status VARCHAR(20) DEFAULT 'pending',
-        abstract_number VARCHAR(50),
-        registration_id VARCHAR(50),
-        submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        reviewer_comments TEXT,
-        final_file_path VARCHAR(500)
-      )
-    `);
-
-    console.log('✅ Database tables initialized successfully');
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Database initialization error:', error);
-    return { success: false, error: error.message };
-  } finally {
-    client.release();
-  }
-}
-
 // Test database connection
-export async function testConnection() {
-  try {
-    const client = await pool.connect();
-    const result = await client.query('SELECT NOW()');
-    client.release();
-    console.log('✅ Database connection successful:', result.rows[0]);
-    return { success: true, time: result.rows[0].now };
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    return { success: false, error: error.message };
-  }
-}
+pool.on('connect', () => {
+  console.log('✅ Connected to PostgreSQL database');
+});
 
-// User operations
+pool.on('error', (err) => {
+  console.error('❌ PostgreSQL connection error:', err);
+});
+
+// ========================================
+// USER MANAGEMENT FUNCTIONS
+// ========================================
+
 export async function createUser(userData) {
   const client = await pool.connect();
-  
   try {
-    const { email, password, full_name, institution, phone } = userData;
-    const registration_id = `REG-${Date.now()}`;
+    console.log('🔄 Creating user:', userData.email);
     
-    const result = await client.query(
-      `INSERT INTO users (email, password, full_name, institution, phone, registration_id) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING id, email, full_name, registration_id`,
-      [email, password, full_name, institution, phone, registration_id]
-    );
+    const query = `
+      INSERT INTO users (email, password, full_name, institution, phone, registration_id, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      RETURNING id, email, full_name, institution, phone, registration_id, created_at
+    `;
     
-    console.log('✅ User created successfully:', result.rows[0]);
-    return { success: true, user: result.rows[0] };
+    const values = [
+      userData.email,
+      userData.password,
+      userData.full_name,
+      userData.institution || null,
+      userData.phone || null,
+      userData.registration_id || null
+    ];
+    
+    const result = await client.query(query, values);
+    console.log('✅ User created successfully:', result.rows[0].id);
+    return result.rows[0];
+    
   } catch (error) {
-    if (error.code === '23505') { // Unique violation
-      console.log('❌ Email already exists');
-      return { success: false, error: 'Email already exists' };
-    }
-    console.error('❌ User creation error:', error);
-    return { success: false, error: error.message };
+    console.error('❌ Error creating user:', error);
+    throw error;
   } finally {
     client.release();
   }
@@ -109,157 +56,167 @@ export async function createUser(userData) {
 
 export async function getUserByEmail(email) {
   const client = await pool.connect();
-  
   try {
-    const result = await client.query('SELECT * FROM users WHERE email = $1', [email]);
+    const query = 'SELECT * FROM users WHERE email = $1';
+    const result = await client.query(query, [email]);
     return result.rows[0] || null;
   } catch (error) {
-    console.error('❌ Get user error:', error);
-    return null;
-  } finally {
-    client.release();
-  }
-}
-
-export async function getUserById(id) {
-  const client = await pool.connect();
-  
-  try {
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
-      throw new Error('Invalid user ID');
-    }
-    
-    const result = await client.query(
-      'SELECT id, email, full_name, institution, phone, registration_id FROM users WHERE id = $1',
-      [numericId]
-    );
-    
-    return result.rows[0] || null;
-  } catch (error) {
-    console.error('❌ Get user by ID error:', error);
-    return null;
-  } finally {
-    client.release();
-  }
-}
-
-// Abstract operations
-export async function createAbstract(abstractData) {
-  const client = await pool.connect();
-  
-  try {
-    const {
-      user_id, title, presenter_name, institution_name,
-      presentation_type, abstract_content, co_authors,
-      file_path, file_name, file_size, registration_id
-    } = abstractData;
-    
-    const abstract_number = `ABST-${presentation_type.substring(0,2).toUpperCase()}-${String(Date.now()).slice(-6)}`;
-    
-    const result = await client.query(`
-      INSERT INTO abstracts (
-        user_id, title, presenter_name, institution_name,
-        presentation_type, abstract_content, co_authors, abstract_number,
-        file_path, file_name, file_size, registration_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
-      RETURNING *
-    `, [
-      user_id, title, presenter_name, institution_name, 
-      presentation_type, abstract_content, co_authors, abstract_number,
-      file_path, file_name, file_size, registration_id
-    ]);
-    
-    console.log('✅ Abstract created successfully:', result.rows[0]);
-    return result.rows[0];
-  } catch (error) {
-    console.error('❌ Abstract creation error:', error);
+    console.error('❌ Error getting user by email:', error);
     throw error;
   } finally {
     client.release();
   }
 }
 
-export async function getAllAbstracts(filters = {}) {
+export async function getUserById(userId) {
   const client = await pool.connect();
-  
   try {
-    let query = `
-      SELECT a.*, u.email as user_email, u.phone as user_phone, u.full_name as user_name 
-      FROM abstracts a 
-      LEFT JOIN users u ON a.user_id = u.id 
+    // Convert to integer if string
+    const id = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    
+    if (isNaN(id)) {
+      throw new Error('Invalid user ID provided');
+    }
+    
+    const query = 'SELECT * FROM users WHERE id = $1';
+    const result = await client.query(query, [id]);
+    
+    console.log(`📊 User ${id} lookup:`, result.rows.length > 0 ? 'Found' : 'Not found');
+    return result.rows[0] || null;
+    
+  } catch (error) {
+    console.error('❌ Error getting user by ID:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ========================================
+// ABSTRACT MANAGEMENT FUNCTIONS
+// ========================================
+
+export async function createAbstract(abstractData) {
+  const client = await pool.connect();
+  try {
+    console.log('🔄 Creating abstract for user:', abstractData.user_id);
+    
+    // Generate unique abstract number
+    const abstractNumber = `ABST-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+    
+    const query = `
+      INSERT INTO abstracts (
+        user_id, title, presenter_name, institution_name, presentation_type,
+        abstract_content, co_authors, file_path, file_name, file_size,
+        status, abstract_number, registration_id, submission_date, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+      RETURNING *
     `;
     
-    const conditions = [];
-    const values = [];
-    
-    if (filters.status && filters.status !== 'all') {
-      conditions.push(`a.status = $${values.length + 1}`);
-      values.push(filters.status);
-    }
-    
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    
-    query += ` ORDER BY a.submission_date DESC`;
-    
-    if (filters.limit) {
-      query += ` LIMIT $${values.length + 1}`;
-      values.push(filters.limit);
-    }
+    const values = [
+      abstractData.user_id,
+      abstractData.title,
+      abstractData.presenter_name,
+      abstractData.institution_name || null,
+      abstractData.presentation_type,
+      abstractData.abstract_content,
+      abstractData.co_authors || null,
+      abstractData.file_path || null,
+      abstractData.file_name || null,
+      abstractData.file_size || null,
+      'pending',
+      abstractNumber,
+      abstractData.registration_id || null
+    ];
     
     const result = await client.query(query, values);
-    console.log(`📊 Retrieved ${result.rows.length} abstracts from database`);
-    return result.rows;
+    console.log('✅ Abstract created successfully:', result.rows[0].id);
+    return result.rows[0];
+    
   } catch (error) {
-    console.error('❌ Get all abstracts error:', error);
-    return [];
+    console.error('❌ Error creating abstract:', error);
+    throw error;
   } finally {
     client.release();
   }
 }
 
-export async function getUserAbstracts(userId) {
+export async function getAbstractsByUserId(userId) {
   const client = await pool.connect();
-  
   try {
-    const numericUserId = parseInt(userId, 10);
-    if (isNaN(numericUserId)) {
-      throw new Error('Invalid user ID');
+    // Convert to integer if string
+    const id = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    
+    if (isNaN(id)) {
+      throw new Error('Invalid user ID provided');
     }
     
-    const result = await client.query(
-      'SELECT * FROM abstracts WHERE user_id = $1 ORDER BY submission_date DESC',
-      [numericUserId]
-    );
+    const query = `
+      SELECT * FROM abstracts 
+      WHERE user_id = $1 
+      ORDER BY submission_date DESC
+    `;
+    
+    const result = await client.query(query, [id]);
+    console.log(`📊 Found ${result.rows.length} abstracts for user ${id}`);
     return result.rows;
+    
   } catch (error) {
-    console.error('❌ Get user abstracts error:', error);
-    return [];
+    console.error('❌ Error getting user abstracts:', error);
+    throw error;
   } finally {
     client.release();
   }
 }
 
-export async function getAbstractById(id) {
+export async function getAllAbstracts() {
   const client = await pool.connect();
-  
   try {
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
-      throw new Error('Invalid abstract ID');
+    const query = `
+      SELECT a.*, u.email, u.phone 
+      FROM abstracts a 
+      LEFT JOIN users u ON a.user_id = u.id 
+      ORDER BY a.submission_date DESC
+    `;
+    
+    const result = await client.query(query);
+    console.log(`📊 Retrieved ${result.rows.length} total abstracts`);
+    return result.rows;
+    
+  } catch (error) {
+    console.error('❌ Error getting all abstracts:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getAbstractById(abstractId) {
+  const client = await pool.connect();
+  try {
+    // Convert to integer if string
+    const id = typeof abstractId === 'string' ? parseInt(abstractId, 10) : abstractId;
+    
+    if (isNaN(id)) {
+      throw new Error('Invalid abstract ID provided');
     }
     
-    const result = await client.query(
-      'SELECT * FROM abstracts WHERE id = $1',
-      [numericId]
-    );
+    const query = `
+      SELECT a.*, u.email, u.phone, u.full_name as user_full_name
+      FROM abstracts a 
+      LEFT JOIN users u ON a.user_id = u.id 
+      WHERE a.id = $1
+    `;
     
+    const result = await client.query(query, [id]);
+    
+    console.log(`📊 Abstract ${id} lookup:`, result.rows.length > 0 ? 'Found' : 'Not found');
     return result.rows[0] || null;
+    
   } catch (error) {
-    console.error('❌ Get abstract by ID error:', error);
-    return null;
+    console.error('❌ Error getting abstract by ID:', error);
+    throw error;
   } finally {
     client.release();
   }
@@ -267,256 +224,343 @@ export async function getAbstractById(id) {
 
 export async function updateAbstractStatus(abstractId, status, comments = null) {
   const client = await pool.connect();
-  
   try {
-    const numericId = parseInt(abstractId, 10);
-    if (isNaN(numericId)) {
-      throw new Error('Invalid abstract ID');
+    // Convert to integer if string
+    const id = typeof abstractId === 'string' ? parseInt(abstractId, 10) : abstractId;
+    
+    if (isNaN(id)) {
+      throw new Error('Invalid abstract ID provided');
     }
     
-    console.log('🔄 Updating single abstract:', { id: numericId, status, comments });
+    console.log(`🔄 Updating abstract ${id} status to: ${status}`);
     
-    const result = await client.query(`
+    const query = `
       UPDATE abstracts 
-      SET status = $1, reviewer_comments = $2, updated_at = CURRENT_TIMESTAMP
+      SET status = $1, reviewer_comments = $2, updated_at = NOW()
       WHERE id = $3
       RETURNING *
-    `, [status, comments, numericId]);
+    `;
     
-    if (result.rows.length > 0) {
-      console.log('✅ Abstract status updated:', result.rows[0]);
-      return result.rows[0];
-    } else {
-      throw new Error('Abstract not found');
+    const result = await client.query(query, [status, comments, id]);
+    
+    if (result.rows.length === 0) {
+      throw new Error(`Abstract with ID ${id} not found`);
     }
+    
+    console.log('✅ Abstract status updated successfully');
+    return result.rows[0];
+    
   } catch (error) {
-    console.error('❌ Update abstract status error:', error);
+    console.error('❌ Error updating abstract status:', error);
     throw error;
   } finally {
     client.release();
   }
 }
+
+// ========================================
+// 🚀 BULK UPDATE FUNCTION - CRITICAL FIX
+// ========================================
 
 export async function bulkUpdateAbstractStatus(abstractIds, status, comments = null) {
   const client = await pool.connect();
   
   try {
-    console.log('🔄 Bulk update starting:', { 
-      abstractIds, 
-      status, 
-      comments,
-      idsType: Array.isArray(abstractIds) ? `array[${abstractIds.length}]` : typeof abstractIds 
+    console.log(`🔄 Bulk updating ${abstractIds.length} abstracts to status: ${status}`);
+    
+    // Convert all IDs to integers and validate
+    const validIds = abstractIds.map(id => {
+      const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+      if (isNaN(numId)) {
+        throw new Error(`Invalid abstract ID: ${id}`);
+      }
+      return numId;
     });
     
-    // Validate inputs
-    if (!abstractIds || !Array.isArray(abstractIds) || abstractIds.length === 0) {
-      throw new Error('Invalid abstractIds array');
-    }
+    // Start transaction for atomicity
+    await client.query('BEGIN');
     
-    if (!status) {
-      throw new Error('Status is required');
-    }
-    
-    // Convert all IDs to integers
-    const numericIds = abstractIds.map(id => {
-      const numId = parseInt(id, 10);
-      console.log(`Converting ID: ${id} (${typeof id}) -> ${numId}`);
-      return numId;
-    }).filter(id => !isNaN(id));
-    
-    console.log('📋 Converted numeric IDs:', numericIds);
-    
-    if (numericIds.length === 0) {
-      throw new Error('No valid numeric abstract IDs found');
-    }
-    
-    // Check which abstracts exist first
-    const placeholders = numericIds.map((_, index) => `$${index + 1}`).join(',');
-    const checkQuery = `
-      SELECT id, title, status, presenter_name 
-      FROM abstracts 
-      WHERE id IN (${placeholders})
-    `;
-    
-    console.log('🔍 Check query:', checkQuery);
-    console.log('🔍 Check params:', numericIds);
-    
-    const checkResult = await client.query(checkQuery, numericIds);
-    console.log('📊 Found abstracts:', checkResult.rows.length, 'out of', numericIds.length);
-    
-    if (checkResult.rows.length === 0) {
-      throw new Error(`No abstracts found with IDs: ${numericIds.join(', ')}`);
-    }
-    
-    // Update the abstracts using IN clause
-    const updatePlaceholders = numericIds.map((_, index) => `$${index + 3}`).join(',');
-    const updateQuery = `
+    // Build query with proper parameterization
+    const placeholders = validIds.map((_, index) => `$${index + 1}`).join(',');
+    const query = `
       UPDATE abstracts 
-      SET 
-        status = $1, 
-        reviewer_comments = $2, 
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id IN (${updatePlaceholders})
-      RETURNING id, title, presenter_name, status, updated_at, reviewer_comments
+      SET status = $${validIds.length + 1}, 
+          reviewer_comments = $${validIds.length + 2}, 
+          updated_at = NOW()
+      WHERE id IN (${placeholders})
+      RETURNING id, title, status
     `;
     
-    console.log('🔄 Update query:', updateQuery);
-    const updateParams = [status, comments, ...numericIds];
-    console.log('🔄 Update params:', updateParams);
+    const values = [...validIds, status, comments];
+    const result = await client.query(query, values);
     
-    const updateResult = await client.query(updateQuery, updateParams);
+    // Commit transaction
+    await client.query('COMMIT');
     
-    console.log('✅ Bulk update successful!');
-    console.log('📊 Updated abstracts count:', updateResult.rows.length);
-    console.log('📋 Updated abstracts:', updateResult.rows.map(r => ({ id: r.id, title: r.title, status: r.status })));
+    console.log(`✅ Successfully updated ${result.rows.length} abstracts in bulk`);
     
-    return updateResult.rows;
+    return {
+      success: true,
+      updatedCount: result.rows.length,
+      updatedAbstracts: result.rows,
+      message: `Successfully updated ${result.rows.length} abstracts to ${status}`
+    };
     
   } catch (error) {
-    console.error('❌ Bulk update error:', {
-      message: error.message,
-      abstractIds,
-      status,
-      comments
-    });
-    throw error;
+    // Rollback transaction on error
+    await client.query('ROLLBACK');
+    
+    console.error('❌ Error in bulk update operation:', error);
+    throw new Error(`Bulk update failed: ${error.message}`);
+    
   } finally {
     client.release();
   }
 }
 
-export async function updateAbstract(id, updateData) {
+export async function updateAbstract(abstractId, updateData) {
   const client = await pool.connect();
-  
   try {
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
-      throw new Error('Invalid abstract ID');
+    // Convert to integer if string
+    const id = typeof abstractId === 'string' ? parseInt(abstractId, 10) : abstractId;
+    
+    if (isNaN(id)) {
+      throw new Error('Invalid abstract ID provided');
     }
     
-    const fields = [];
+    console.log(`🔄 Updating abstract ${id} with data:`, Object.keys(updateData));
+    
+    // Build dynamic query based on provided fields
+    const updateFields = [];
     const values = [];
     let paramCount = 1;
-
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key] !== undefined) {
-        fields.push(`${key} = $${paramCount}`);
-        values.push(updateData[key]);
+    
+    // Handle each possible update field
+    const allowedFields = [
+      'title', 'presenter_name', 'institution_name', 'presentation_type',
+      'abstract_content', 'co_authors', 'file_path', 'file_name', 
+      'file_size', 'status', 'reviewer_comments', 'final_file_path'
+    ];
+    
+    for (const field of allowedFields) {
+      if (updateData[field] !== undefined) {
+        updateFields.push(`${field} = $${paramCount}`);
+        values.push(updateData[field]);
         paramCount++;
       }
-    });
-
-    if (fields.length === 0) {
-      throw new Error('No fields to update');
     }
-
-    fields.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(numericId);
-
+    
+    if (updateFields.length === 0) {
+      throw new Error('No valid fields provided for update');
+    }
+    
+    // Always update the updated_at timestamp
+    updateFields.push(`updated_at = NOW()`);
+    
+    // Add the ID parameter at the end
+    values.push(id);
+    
     const query = `
       UPDATE abstracts 
-      SET ${fields.join(', ')}
+      SET ${updateFields.join(', ')}
       WHERE id = $${paramCount}
       RETURNING *
     `;
-
+    
     const result = await client.query(query, values);
-    return result.rows[0];
-  } catch (error) {
-    console.error('❌ Update abstract error:', error);
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function deleteAbstract(id) {
-  const client = await pool.connect();
-  
-  try {
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
-      throw new Error('Invalid abstract ID');
+    
+    if (result.rows.length === 0) {
+      throw new Error(`Abstract with ID ${id} not found`);
     }
     
-    const result = await client.query('DELETE FROM abstracts WHERE id = $1 RETURNING *', [numericId]);
+    console.log('✅ Abstract updated successfully');
     return result.rows[0];
+    
   } catch (error) {
-    console.error('❌ Delete abstract error:', error);
+    console.error('❌ Error updating abstract:', error);
     throw error;
   } finally {
     client.release();
   }
 }
 
-export async function getAbstractStats() {
+export async function deleteAbstract(abstractId) {
   const client = await pool.connect();
-  
   try {
-    const result = await client.query(`
-      SELECT 
-        status,
-        COUNT(*) as count
-      FROM abstracts 
-      GROUP BY status
-    `);
+    // Convert to integer if string
+    const id = typeof abstractId === 'string' ? parseInt(abstractId, 10) : abstractId;
     
-    const stats = {
-      total: 0,
-      pending: 0,
-      approved: 0,
-      rejected: 0,
-      under_review: 0,
-      final_submitted: 0
-    };
+    if (isNaN(id)) {
+      throw new Error('Invalid abstract ID provided');
+    }
     
-    result.rows.forEach(row => {
-      stats[row.status] = parseInt(row.count);
-      stats.total += parseInt(row.count);
-    });
+    console.log(`🔄 Deleting abstract ${id}`);
     
-    return stats;
+    const query = 'DELETE FROM abstracts WHERE id = $1 RETURNING *';
+    const result = await client.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      throw new Error(`Abstract with ID ${id} not found`);
+    }
+    
+    console.log('✅ Abstract deleted successfully');
+    return result.rows[0];
+    
   } catch (error) {
-    console.error('❌ Get stats error:', error);
-    return {
-      total: 0,
-      pending: 0,
-      approved: 0,
-      rejected: 0,
-      under_review: 0,
-      final_submitted: 0
-    };
+    console.error('❌ Error deleting abstract:', error);
+    throw error;
   } finally {
     client.release();
   }
 }
+
+// ========================================
+// STATISTICS AND REPORTING
+// ========================================
 
 export async function getStatistics() {
   const client = await pool.connect();
-  
   try {
-    const result = await client.query(`
+    console.log('🔄 Fetching statistics...');
+    
+    const query = `
       SELECT 
         presentation_type,
-        COUNT(*) as total,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
-        COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved,
-        COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected
-      FROM abstracts
+        COUNT(*) as total_count,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_count,
+        COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_count,
+        COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_count
+      FROM abstracts 
       GROUP BY presentation_type
       ORDER BY presentation_type
-    `);
+    `;
     
-    return result.rows;
+    const result = await client.query(query);
+    
+    // Also get overall totals
+    const totalQuery = `
+      SELECT 
+        COUNT(*) as total_abstracts,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as total_pending,
+        COUNT(CASE WHEN status = 'approved' THEN 1 END) as total_approved,
+        COUNT(CASE WHEN status = 'rejected' THEN 1 END) as total_rejected,
+        COUNT(DISTINCT user_id) as total_users
+      FROM abstracts
+    `;
+    
+    const totalResult = await client.query(totalQuery);
+    
+    console.log('✅ Statistics retrieved successfully');
+    
+    return {
+      byCategory: result.rows,
+      totals: totalResult.rows[0]
+    };
+    
   } catch (error) {
-    console.error('❌ Get statistics error:', error);
-    return [];
+    console.error('❌ Error getting statistics:', error);
+    throw error;
   } finally {
     client.release();
   }
 }
 
-// Initialize database on module load
-initializeDatabase().catch(console.error);
+// ========================================
+// UTILITY FUNCTIONS
+// ========================================
 
-export default pool;
+export async function initializeDatabase() {
+  const client = await pool.connect();
+  try {
+    console.log('🔄 Checking database tables...');
+    
+    // Check if tables exist
+    const tablesQuery = `
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('users', 'abstracts')
+    `;
+    
+    const result = await client.query(tablesQuery);
+    const existingTables = result.rows.map(row => row.table_name);
+    
+    if (existingTables.includes('users') && existingTables.includes('abstracts')) {
+      console.log('✅ Database tables exist and ready');
+      return true;
+    } else {
+      console.log('⚠️ Some tables missing. Database needs setup.');
+      return false;
+    }
+    
+  } catch (error) {
+    console.error('❌ Error checking database:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function closePool() {
+  try {
+    await pool.end();
+    console.log('✅ Database pool closed');
+  } catch (error) {
+    console.error('❌ Error closing pool:', error);
+    throw error;
+  }
+}
+
+// ========================================
+// ERROR HANDLING UTILITIES
+// ========================================
+
+export function handleDatabaseError(error, operation) {
+  console.error(`❌ Database error during ${operation}:`, {
+    message: error.message,
+    code: error.code,
+    detail: error.detail,
+    hint: error.hint
+  });
+  
+  // Return user-friendly error messages
+  if (error.code === '23505') { // Unique violation
+    return new Error('A record with this information already exists');
+  } else if (error.code === '23503') { // Foreign key violation
+    return new Error('Referenced record not found');
+  } else if (error.code === '23502') { // Not null violation
+    return new Error('Required field is missing');
+  } else {
+    return new Error(`Database operation failed: ${error.message}`);
+  }
+}
+
+// Export pool for direct access if needed
+export { pool };
+
+// Default export for convenience
+export default {
+  // User functions
+  createUser,
+  getUserByEmail,
+  getUserById,
+  
+  // Abstract functions
+  createAbstract,
+  getAbstractsByUserId,
+  getAllAbstracts,
+  getAbstractById,
+  updateAbstractStatus,
+  bulkUpdateAbstractStatus, // 🚀 CRITICAL FUNCTION
+  updateAbstract,
+  deleteAbstract,
+  
+  // Statistics and utilities
+  getStatistics,
+  initializeDatabase,
+  closePool,
+  handleDatabaseError,
+  
+  // Direct pool access
+  pool
+};
