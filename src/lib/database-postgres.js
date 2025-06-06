@@ -1,4 +1,6 @@
 // src/lib/database-postgres.js
+// 🚀 COMPLETE FIXED VERSION - Replace entire file content
+
 import { Pool } from 'pg';
 
 const pool = new Pool({
@@ -170,11 +172,31 @@ export async function getAbstractsByUserId(userId) {
   }
 }
 
+// 🚀 CRITICAL FIX: getAllAbstracts with proper field mapping
 export async function getAllAbstracts() {
   const client = await pool.connect();
   try {
     const query = `
-      SELECT a.*, u.email, u.phone 
+      SELECT 
+        a.id,
+        a.title,
+        a.presenter_name,
+        a.institution_name,
+        a.presentation_type,
+        a.abstract_content,
+        a.co_authors,
+        a.status,
+        a.abstract_number,
+        a.registration_id,
+        a.submission_date,
+        a.updated_at,
+        a.reviewer_comments,
+        a.file_path,
+        a.file_name,
+        a.file_size,
+        u.email,
+        u.phone,
+        u.full_name as user_full_name
       FROM abstracts a 
       LEFT JOIN users u ON a.user_id = u.id 
       ORDER BY a.submission_date DESC
@@ -182,7 +204,78 @@ export async function getAllAbstracts() {
     
     const result = await client.query(query);
     console.log(`📊 Retrieved ${result.rows.length} total abstracts`);
-    return result.rows;
+    
+    // 🎯 CRITICAL FIX: Map database fields to frontend expected format
+    const mappedAbstracts = result.rows.map((abstract, index) => ({
+      // Core fields
+      id: abstract.id,
+      title: abstract.title || 'Untitled',
+      
+      // 🚀 FIX: Multiple name mappings for presenter
+      presenter_name: abstract.presenter_name || 'Unknown',
+      author: abstract.presenter_name || 'Unknown', // Frontend expects 'author'
+      
+      // 🚀 FIX: Multiple email mappings
+      email: abstract.email || 'N/A',
+      
+      // 🚀 FIX: Multiple phone/mobile mappings
+      phone: abstract.phone || 'N/A',
+      mobile_no: abstract.phone || 'N/A', // Frontend expects 'mobile_no'
+      mobile: abstract.phone || 'N/A', // Alternative field name
+      
+      // 🚀 FIX: Multiple title mappings
+      abstract_title: abstract.title || 'Untitled',
+      
+      // 🚀 FIX: Multiple co-author mappings
+      co_authors: abstract.co_authors || 'N/A',
+      coAuthors: abstract.co_authors || 'N/A', // Alternative field name
+      
+      // 🚀 FIX: Multiple institution mappings
+      institution_name: abstract.institution_name || 'N/A',
+      institution: abstract.institution_name || 'N/A', // Alternative field name
+      affiliation: abstract.institution_name || 'N/A', // Alternative field name
+      
+      // 🚀 FIX: Multiple registration ID mappings
+      registration_id: abstract.registration_id || 'N/A',
+      registrationId: abstract.registration_id || 'N/A', // Alternative field name
+      
+      // 🚀 FIX: Status with safe operations
+      status: abstract.status || 'pending',
+      
+      // 🚀 FIX: Multiple presentation type mappings
+      presentation_type: abstract.presentation_type || 'Free Paper',
+      category: abstract.presentation_type || 'Free Paper', // Frontend expects 'category'
+      
+      // 🚀 FIX: Multiple abstract number mappings
+      abstract_number: abstract.abstract_number || `ABST-${String(index + 1).padStart(3, '0')}`,
+      abstractNumber: abstract.abstract_number || `ABST-${String(index + 1).padStart(3, '0')}`, // Alternative field name
+      
+      // 🚀 FIX: Multiple date mappings
+      submission_date: abstract.submission_date,
+      submissionDate: abstract.submission_date, // Alternative field name
+      updated_at: abstract.updated_at,
+      
+      // Other fields
+      reviewer_comments: abstract.reviewer_comments,
+      file_path: abstract.file_path,
+      file_name: abstract.file_name,
+      fileName: abstract.file_name, // Alternative field name
+      file_size: abstract.file_size,
+      fileSize: abstract.file_size, // Alternative field name
+      
+      // 🚀 FIX: Multiple abstract content mappings
+      abstract_content: abstract.abstract_content || '',
+      abstract: abstract.abstract_content || '', // Frontend expects 'abstract'
+      
+      // 🚀 FIX: Safe string operations for filtering
+      statusLower: (abstract.status || 'pending').toLowerCase(),
+      presentationTypeLower: (abstract.presentation_type || 'free paper').toLowerCase(),
+      
+      // Additional computed fields
+      hasFile: !!(abstract.file_path || abstract.file_name)
+    }));
+    
+    return mappedAbstracts;
     
   } catch (error) {
     console.error('❌ Error getting all abstracts:', error);
@@ -259,14 +352,14 @@ export async function updateAbstractStatus(abstractId, status, comments = null) 
 }
 
 // ========================================
-// 🚀 BULK UPDATE FUNCTION - CRITICAL FIX
+// 🚀 CRITICAL FIX: BULK UPDATE FUNCTION - PROPER RETURN FORMAT
 // ========================================
 
 export async function bulkUpdateAbstractStatus(abstractIds, status, comments = null) {
   const client = await pool.connect();
   
   try {
-    console.log(`🔄 Bulk updating ${abstractIds.length} abstracts to status: ${status}`);
+    console.log(`🔄 [PostgreSQL] Bulk updating ${abstractIds.length} abstracts to status: ${status}`);
     
     // Convert all IDs to integers and validate
     const validIds = abstractIds.map(id => {
@@ -276,6 +369,8 @@ export async function bulkUpdateAbstractStatus(abstractIds, status, comments = n
       }
       return numId;
     });
+    
+    console.log('📊 Valid IDs to update:', validIds);
     
     // Start transaction for atomicity
     await client.query('BEGIN');
@@ -288,30 +383,30 @@ export async function bulkUpdateAbstractStatus(abstractIds, status, comments = n
           reviewer_comments = $${validIds.length + 2}, 
           updated_at = NOW()
       WHERE id IN (${placeholders})
-      RETURNING id, title, status
+      RETURNING id, title, status, presenter_name, updated_at
     `;
     
     const values = [...validIds, status, comments];
+    console.log('🔄 Executing bulk update query...');
+    
     const result = await client.query(query, values);
     
     // Commit transaction
     await client.query('COMMIT');
     
-    console.log(`✅ Successfully updated ${result.rows.length} abstracts in bulk`);
+    const updatedCount = result.rows.length;
+    console.log(`✅ [PostgreSQL] Successfully updated ${updatedCount} abstracts in bulk`);
     
-    return {
-      success: true,
-      updatedCount: result.rows.length,
-      updatedAbstracts: result.rows,
-      message: `Successfully updated ${result.rows.length} abstracts to ${status}`
-    };
+    // 🎯 CRITICAL FIX: Return ARRAY directly (not object)
+    // Frontend expects array of updated abstracts
+    return result.rows;
     
   } catch (error) {
     // Rollback transaction on error
     await client.query('ROLLBACK');
     
-    console.error('❌ Error in bulk update operation:', error);
-    throw new Error(`Bulk update failed: ${error.message}`);
+    console.error('❌ [PostgreSQL] Bulk update error:', error);
+    throw error;
     
   } finally {
     client.release();
@@ -469,6 +564,19 @@ export async function getStatistics() {
 // UTILITY FUNCTIONS
 // ========================================
 
+export async function testConnection() {
+  try {
+    const client = await pool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
+    console.log('✅ PostgreSQL connection test successful');
+    return true;
+  } catch (error) {
+    console.error('❌ PostgreSQL connection test failed:', error);
+    throw error;
+  }
+}
+
 export async function initializeDatabase() {
   const client = await pool.connect();
   try {
@@ -557,6 +665,7 @@ export default {
   
   // Statistics and utilities
   getStatistics,
+  testConnection,
   initializeDatabase,
   closePool,
   handleDatabaseError,
