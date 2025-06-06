@@ -808,11 +808,6 @@ export async function GET(request) {
       success: true,
       message: 'APBMT Abstract Email API is operational',
       version: '2.0',
-    // Default API documentation response
-    return NextResponse.json({
-      success: true,
-      message: 'APBMT Abstract Email API is operational',
-      version: '2.0',
       endpoints: {
         'POST /api/abstracts/email': {
           description: 'Send emails for abstracts',
