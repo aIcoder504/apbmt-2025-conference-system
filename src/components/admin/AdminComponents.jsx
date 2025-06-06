@@ -1,4 +1,4 @@
-// src/components/admin/AdminComponents.jsx - COMPLETE WITH ENHANCED POP-UPS
+// src/components/admin/AdminComponents.jsx - COMPLETE FIXED VERSION WITH EMAIL
 'use client';
 
 import { useState } from 'react';
@@ -74,26 +74,29 @@ const showToast = (message, type = 'success', duration = 8000) => {
   return toast;
 };
 
-// EMAIL INTEGRATION - SIMPLE & WORKING
+// 🚀 FIXED EMAIL INTEGRATION - CORRECT ENDPOINT
 export const EmailIntegration = {
-  // Send individual email
+  // Fixed send email function with correct endpoint
   sendEmail: async (abstract, emailType = 'status_update') => {
     try {
       console.log('🔄 Sending email to:', abstract.email, 'Type:', emailType);
       
-      const response = await fetch('/api/email', {
+      // ✅ FIXED: Correct endpoint /api/abstracts/email
+      const response = await fetch('/api/abstracts/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: emailType,
           data: {
-            email: abstract.email,
-            name: abstract.author,
-            title: abstract.title,
+            email: abstract.email || abstract.mobile_no,
+            name: abstract.author || abstract.presenter_name,
+            title: abstract.title || abstract.abstract_title,
             abstractId: abstract.id,
             status: abstract.status,
-            category: abstract.category,
-            institution: abstract.affiliation
+            category: abstract.category || abstract.presentation_type,
+            institution: abstract.affiliation || abstract.institution_name,
+            submissionId: abstract.abstract_number || abstract.id,
+            reviewDate: new Date().toISOString()
           }
         })
       });
@@ -114,28 +117,29 @@ export const EmailIntegration = {
     }
   },
 
-  // Send approval email with custom template
+  // Fixed approval email with correct endpoint
   sendApprovalEmail: async (abstract) => {
-    const emailData = {
-      type: 'approval',
-      data: {
-        email: abstract.email,
-        name: abstract.author,
-        title: abstract.title,
-        abstractId: abstract.abstractNumber || abstract.id,
-        category: abstract.category,
-        date: '16/03/2025', // Conference date
-        time: '09:00 AM',
-        duration: abstract.category.includes('Paper') ? '6+2 min' : '5+2 min',
-        hall: 'Hall A'
-      }
-    };
-
     try {
-      const response = await fetch('/api/email', {
+      console.log('🔄 Sending approval email to:', abstract.email);
+      
+      const response = await fetch('/api/abstracts/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailData)
+        body: JSON.stringify({
+          type: 'status_update',
+          data: {
+            email: abstract.email || abstract.mobile_no,
+            name: abstract.author || abstract.presenter_name,
+            title: abstract.title || abstract.abstract_title,
+            abstractId: abstract.id,
+            status: 'approved',
+            category: abstract.category || abstract.presentation_type,
+            institution: abstract.affiliation || abstract.institution_name,
+            submissionId: abstract.abstract_number || abstract.id,
+            reviewDate: new Date().toISOString(),
+            comments: 'Your abstract has been approved for presentation.'
+          }
+        })
       });
 
       const result = await response.json();
@@ -153,24 +157,29 @@ export const EmailIntegration = {
     }
   },
 
-  // Send rejection email
+  // Fixed rejection email with correct endpoint
   sendRejectionEmail: async (abstract, comments = '') => {
-    const emailData = {
-      type: 'rejection',
-      data: {
-        email: abstract.email,
-        name: abstract.author,
-        title: abstract.title,
-        abstractId: abstract.abstractNumber || abstract.id,
-        comments: comments || 'Please review and improve your abstract for future submissions.'
-      }
-    };
-
     try {
-      const response = await fetch('/api/email', {
+      console.log('🔄 Sending rejection email to:', abstract.email);
+      
+      const response = await fetch('/api/abstracts/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailData)
+        body: JSON.stringify({
+          type: 'status_update',
+          data: {
+            email: abstract.email || abstract.mobile_no,
+            name: abstract.author || abstract.presenter_name,
+            title: abstract.title || abstract.abstract_title,
+            abstractId: abstract.id,
+            status: 'rejected',
+            category: abstract.category || abstract.presentation_type,
+            institution: abstract.affiliation || abstract.institution_name,
+            submissionId: abstract.abstract_number || abstract.id,
+            reviewDate: new Date().toISOString(),
+            comments: comments || 'Please review and improve your abstract for future submissions.'
+          }
+        })
       });
 
       const result = await response.json();
@@ -188,7 +197,7 @@ export const EmailIntegration = {
     }
   },
 
-  // Simple bulk email (basic version) - FIXED
+  // 🚀 FIXED BULK EMAIL WITH CORRECT ENDPOINT
   sendBulkEmail: async (abstracts, emailType) => {
     if (abstracts.length === 0) {
       showToast('❌ No abstracts selected for bulk email', 'error');
@@ -205,13 +214,34 @@ export const EmailIntegration = {
 
     for (const abstract of abstracts) {
       try {
-        // FIX: Use EmailIntegration.sendEmail instead of this.sendEmail
-        const success = await EmailIntegration.sendEmail(abstract, emailType);
-        if (success) {
+        // ✅ FIXED: Use correct API endpoint
+        const response = await fetch('/api/abstracts/email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'status_update',
+            data: {
+              email: abstract.email || abstract.mobile_no,
+              name: abstract.author || abstract.presenter_name,
+              title: abstract.title || abstract.abstract_title,
+              abstractId: abstract.id,
+              status: abstract.status,
+              category: abstract.category || abstract.presentation_type,
+              institution: abstract.affiliation || abstract.institution_name,
+              submissionId: abstract.abstract_number || abstract.id,
+              reviewDate: new Date().toISOString()
+            }
+          })
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
           successCount++;
         } else {
           failCount++;
         }
+        
         // Small delay to prevent overwhelming the email service
         await new Promise(resolve => setTimeout(resolve, 500));
       } catch (error) {
@@ -373,21 +403,20 @@ export const CategoryWiseStatisticsTable = ({ stats, categoryStats }) => {
   );
 };
 
-// 2. PRD SECTION 3.4.3 - Enhanced Abstract Review Interface WITH COMPLETE BULK OPERATIONS - FIXED WITH POP-UPS!
+// 2. PRD SECTION 3.4.3 - Enhanced Abstract Review Interface WITH COMPLETE BULK OPERATIONS
 export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateStatus, onSendEmail, onDownload, handleBulkStatusUpdate }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   
-  // 🆕 STEP 1: Multi-select state
+  // Multi-select state
   const [selectedAbstracts, setSelectedAbstracts] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
 
-  // 🆕 STEP 1: Multi-select functions
+  // Multi-select functions
   const handleSelectAll = (checked) => {
     setSelectAll(checked);
     if (checked) {
-      // Select all visible abstracts (filtered)
       const filteredAbstracts = getFilteredAbstracts();
       setSelectedAbstracts(filteredAbstracts.map(abstract => abstract.id));
     } else {
@@ -398,14 +427,11 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
   const handleSelectAbstract = (abstractId) => {
     setSelectedAbstracts(prev => {
       if (prev.includes(abstractId)) {
-        // Remove from selection
         const updated = prev.filter(id => id !== abstractId);
-        setSelectAll(false); // Uncheck "Select All" if individual item unchecked
+        setSelectAll(false);
         return updated;
       } else {
-        // Add to selection
         const updated = [...prev, abstractId];
-        // Check if all visible abstracts are now selected
         const filteredAbstracts = getFilteredAbstracts();
         if (updated.length === filteredAbstracts.length) {
           setSelectAll(true);
@@ -415,12 +441,10 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     });
   };
 
-  // 🆕 STEP 1: Get selected abstract objects
   const getSelectedAbstractObjects = () => {
     return abstracts.filter(abstract => selectedAbstracts.includes(abstract.id));
   };
 
-  // 🆕 STEP 1: Filter function for search and category
   const getFilteredAbstracts = () => {
     return abstracts.filter(abstract => {
       const matchesSearch = abstract.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -434,7 +458,7 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     });
   };
 
-  // 🎯 ENHANCED BULK STATUS UPDATE WITH PROPER POP-UP FEEDBACK
+  // 🚀 FIXED BULK STATUS UPDATE WITH PROPER EMAIL INTEGRATION
   const handleInternalBulkStatusUpdate = async (status) => {
     const selected = getSelectedAbstractObjects();
     
@@ -446,7 +470,6 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     const statusText = status === 'approved' ? 'APPROVE' : 'REJECT';
     const statusIcon = status === 'approved' ? '✅' : '❌';
     
-    // Enhanced confirmation dialog
     const confirmed = confirm(
       `${statusIcon} Bulk ${statusText} Confirmation\n\n` +
       `📊 Selected: ${selected.length} abstracts\n` +
@@ -462,14 +485,13 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
       return;
     }
 
-    // Show loading toast
     const loadingToast = showToast(
       `🔄 Processing Bulk ${statusText}...\n\n` +
       `📊 Total: ${selected.length} abstracts\n` +
       `⏳ Please wait while we update the database\n` +
       `📧 Emails will be sent after database update`,
       'info',
-      30000 // Long duration for loading
+      30000
     );
 
     try {
@@ -493,7 +515,6 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
       const updateResult = await response.json();
       console.log('📊 Database update result:', updateResult);
 
-      // Remove loading toast
       if (document.body.contains(loadingToast)) {
         document.body.removeChild(loadingToast);
       }
@@ -502,9 +523,7 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
         throw new Error(updateResult.error || 'Database update failed');
       }
 
-      // 🎯 SUCCESS WITH DETAILED FEEDBACK
       if (updateResult.successful > 0) {
-        // Show immediate success message
         showToast(
           `${statusIcon} Database Update Successful!\n\n` +
           `📊 Results:\n` +
@@ -516,7 +535,7 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
           5000
         );
 
-        // Send emails with progress feedback
+        // 🚀 FIXED: Send emails using correct API endpoint
         if (updateResult.successful > 0) {
           const emailToast = showToast(
             `📧 Sending Email Notifications...\n\n` +
@@ -526,197 +545,60 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
             15000
           );
 
-          let emailSuccessCount = 0;
-          let emailFailCount = 0;
+          try {
+            // Use the dedicated bulk email API
+            const emailResponse = await fetch('/api/abstracts/email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'bulk_status_update',
+                abstractIds: selected.map(abstract => abstract.id),
+                status: status,
+                comments: `Bulk ${status} operation - Your abstract has been ${status}.`
+              })
+            });
 
-          // Process emails with detailed feedback
-          for (let i = 0; i < updateResult.results.length; i++) {
-            const successfulUpdate = updateResult.results[i];
-            try {
-              const abstract = selected.find(a => a.id === successfulUpdate.id);
-              if (abstract) {
-                let emailSent = false;
-                
-                if (status === 'approved') {
-                  emailSent = await EmailIntegration.sendApprovalEmail(abstract);
-                } else if (status === 'rejected') {
-                  emailSent = await EmailIntegration.sendRejectionEmail(abstract, 'Bulk review decision');
-                }
+            const emailResult = await emailResponse.json();
 
-                if (emailSent) {
-                  emailSuccessCount++;
-                } else {
-                  emailFailCount++;
-                }
-
-                // Update progress
-                if (document.body.contains(emailToast)) {
-                  const progressDiv = emailToast.querySelector('.text-sm');
-                  if (progressDiv) {
-                    progressDiv.innerHTML = 
-                      `📧 Sending Email Notifications...\n\n` +
-                      `📊 Progress: ${i + 1}/${updateResult.results.length}\n` +
-                      `✅ Sent: ${emailSuccessCount}\n` +
-                      `❌ Failed: ${emailFailCount}`;
-                  }
-                }
-              }
-              
-              // Small delay
-              await new Promise(resolve => setTimeout(resolve, 500));
-              
-            } catch (emailError) {
-              console.error('Email error for:', successfulUpdate.id, emailError);
-              emailFailCount++;
+            if (document.body.contains(emailToast)) {
+              document.body.removeChild(emailToast);
             }
+
+            showToast(
+              `🎉 Bulk ${statusText} Operation Complete!\n\n` +
+              `📊 Database Updates:\n` +
+              `• ✅ Successful: ${updateResult.successful}\n` +
+              `• ❌ Failed: ${updateResult.failed}\n\n` +
+              `📧 Email Notifications:\n` +
+              `• ✅ Sent: ${emailResult.results?.emailsSent || 0}\n` +
+              `• ❌ Failed: ${emailResult.results?.emailsTotal - emailResult.results?.emailsSent || 0}\n\n` +
+              `💾 All changes saved to database\n` +
+              `🔄 Page will refresh in 3 seconds`,
+              'success',
+              15000
+            );
+
+          } catch (emailError) {
+            console.error('Bulk email error:', emailError);
+            if (document.body.contains(emailToast)) {
+              document.body.removeChild(emailToast);
+            }
+            
+            showToast(
+              `⚠️ Partial Success\n\n` +
+              `💾 Database: ✅ Updated ${updateResult.successful} abstracts\n` +
+              `📧 Emails: ❌ Failed to send\n\n` +
+              `Database changes saved but emails failed.\n` +
+              `You may need to send emails manually.`,
+              'warning',
+              10000
+            );
           }
-
-          // Remove email progress toast
-          if (document.body.contains(emailToast)) {
-            document.body.removeChild(emailToast);
-          }
-
-          // Show final comprehensive results
-          showToast(
-            `🎉 Bulk ${statusText} Operation Complete!\n\n` +
-            `📊 Database Updates:\n` +
-            `• ✅ Successful: ${updateResult.successful}\n` +
-            `• ❌ Failed: ${updateResult.failed}\n\n` +
-            `📧 Email Notifications:\n` +
-            `• ✅ Sent: ${emailSuccessCount}\n` +
-            `• ❌ Failed: ${emailFailCount}\n\n` +
-            `💾 All changes saved to database\n` +
-            `🔄 Page will refresh in 3 seconds`,
-            'success',
-            15000
-          );
-
-        } else {
-          throw new Error('No abstracts were successfully updated');
         }
 
-        // Clear selection and refresh UI
         setSelectedAbstracts([]);
         setSelectAll(false);
 
-        // Delayed refresh with countdown
-        setTimeout(() => {
-          showToast(`🔄 Refreshing page data...`, 'info', 2000);
-          setTimeout(() => {
-            window.location.reload();
-          }, 1000);
-        }, 3000);
-
-      } else {
-        throw new Error(`No abstracts were updated. Expected: ${selected.length}, Successful: ${updateResult.successful}`);
-      }
-
-    } catch (error) {
-      // Remove any loading toasts
-      const loadingToasts = document.querySelectorAll('.custom-toast');
-      loadingToasts.forEach(toast => {
-        if (document.body.contains(toast)) {
-          document.body.removeChild(toast);
-        }
-      });
-
-      console.error('❌ Bulk operation error:', error);
-      
-      // Show detailed error message
-      showToast(
-        `❌ Bulk ${statusText} Failed!\n\n` +
-        `💥 Error: ${error.message}\n\n` +
-        `🔍 Debug Info:\n` +
-        `• Selected: ${selected.length} abstracts\n` +
-        `• IDs: ${selected.map(a => a.id).join(', ')}\n` +
-        `• Status: ${status}\n\n` +
-        `🔧 Troubleshooting:\n` +
-        `• Check internet connection\n` +
-        `• Verify server is running\n` +
-        `• Try refreshing the page\n` +
-        `• Contact administrator if problem persists`,
-        'error',
-        20000
-      );
-    }
-  };
-
-  // 🎯 ENHANCED INDIVIDUAL OPERATION WITH POP-UP FEEDBACK
-  const handleIndividualStatusUpdate = async (abstract, newStatus) => {
-    const statusIcon = newStatus === 'approved' ? '✅' : '❌';
-    const statusText = newStatus.toUpperCase();
-
-    // Confirmation dialog
-    const confirmed = confirm(
-      `${statusIcon} ${statusText} Confirmation\n\n` +
-      `📝 Abstract: ${abstract.title}\n` +
-      `👤 Author: ${abstract.author}\n` +
-      `📧 Email: ${abstract.email}\n` +
-      `🔄 New Status: ${statusText}\n\n` +
-      `This will:\n` +
-      `• Update status in database\n` +
-      `• Send ${newStatus} email to presenter\n\n` +
-      `Continue?`
-    );
-
-    if (!confirmed) {
-      showToast(`❌ ${statusText} Cancelled\n\nNo changes made to "${abstract.title}"`, 'warning', 3000);
-      return;
-    }
-
-    try {
-      // Show loading
-      const loadingToast = showToast(
-        `🔄 Updating Abstract...\n\n` +
-        `📝 "${abstract.title}"\n` +
-        `🔄 Status: ${statusText}\n` +
-        `⏳ Please wait...`,
-        'info',
-        10000
-      );
-
-      // API call
-      const response = await fetch('/api/abstracts', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          id: abstract.id, 
-          status: newStatus,
-          updatedBy: 'admin',
-          comments: `Individual ${newStatus} operation`
-        })
-      });
-
-      const result = await response.json();
-
-      // Remove loading toast
-      if (document.body.contains(loadingToast)) {
-        document.body.removeChild(loadingToast);
-      }
-
-      if (result.success) {
-        // Send email
-        let emailSent = false;
-        if (newStatus === 'approved') {
-          emailSent = await EmailIntegration.sendApprovalEmail(abstract);
-        } else if (newStatus === 'rejected') {
-          emailSent = await EmailIntegration.sendRejectionEmail(abstract, 'Individual review decision');
-        }
-
-        // Show success with email status
-        showToast(
-          `${statusIcon} ${statusText} Successful!\n\n` +
-          `📝 Abstract: "${abstract.title}"\n` +
-          `👤 Author: ${abstract.author}\n` +
-          `📧 Email: ${abstract.email}\n\n` +
-          `💾 Database: ✅ Updated\n` +
-          `📧 Email: ${emailSent ? '✅ Sent' : '❌ Failed'}\n\n` +
-          `🔄 Page will refresh in 2 seconds`,
-          'success',
-          8000
-        );
-
-        // Refresh after delay
         setTimeout(() => {
           window.location.reload();
         }, 2000);
@@ -738,7 +620,7 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     }
   };
 
-  // 🔧 FIXED: Use external handleBulkStatusUpdate if provided, otherwise use internal
+  // Use external handleBulkStatusUpdate if provided, otherwise use internal
   const bulkUpdateFunction = handleBulkStatusUpdate || handleInternalBulkStatusUpdate;
 
   // Enhanced Bulk Export with Real Data
@@ -751,14 +633,12 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     }
 
     try {
-      // Show loading state
       showToast(
         `🔄 Preparing export for ${selected.length} abstracts...\n\nPlease wait...`,
         'info',
         5000
       );
 
-      // Prepare export data with all PRD required columns
       const exportData = selected.map((abstract, index) => ({
         'Abstract No': abstract.abstract_number || `ABST-${String(index + 1).padStart(3, '0')}`,
         'Submission Date': formatDate(abstract.submission_date || abstract.submissionDate),
@@ -774,10 +654,9 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
         'Abstract Content': abstract.abstract_content || abstract.abstract || 'N/A'
       }));
 
-      // Convert to CSV format
       const headers = Object.keys(exportData[0]);
       const csvContent = [
-        headers.join(','), // Header row
+        headers.join(','),
         ...exportData.map(row => 
           headers.map(header => {
             const value = row[header]?.toString() || '';
@@ -788,7 +667,6 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
         )
       ].join('\n');
 
-      // Create and download file
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       
@@ -806,14 +684,12 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
         document.body.removeChild(link);
       }
 
-      // Show success message
       showToast(
         `📊 Export Successful!\n\nDownloaded ${selected.length} abstracts\nFilename: APBMT_Selected_Abstracts_${new Date().toISOString().split('T')[0]}_${selected.length}items.csv`,
         'success',
         8000
       );
 
-      // Clear selection after export
       setSelectedAbstracts([]);
       setSelectAll(false);
 
@@ -837,7 +713,6 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     const categoryIds = categoryAbstracts.map(abstract => abstract.id);
     setSelectedAbstracts(categoryIds);
     
-    // Update select all checkbox if all visible abstracts are selected
     const filteredAbstracts = getFilteredAbstracts();
     setSelectAll(categoryIds.length === filteredAbstracts.length);
 
@@ -857,7 +732,6 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
       return;
     }
 
-    // Show email template selection
     const emailType = prompt(
       `📧 Bulk Email to ${selected.length} recipients\n\n` +
       `Choose email template:\n\n` +
@@ -882,7 +756,6 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
       return;
     }
 
-    // Confirm and send
     const confirmed = confirm(
       `📧 Send ${selectedTemplate} emails?\n\n` +
       `Recipients: ${selected.length}\n` +
@@ -893,7 +766,6 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     if (confirmed) {
       EmailIntegration.sendBulkEmail(selected, selectedTemplate);
       
-      // Clear selection after email
       setSelectedAbstracts([]);
       setSelectAll(false);
     }
@@ -915,7 +787,7 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
 
   return (
     <div className="bg-white rounded-lg shadow-md">
-      {/* Enhanced Bulk Operations Toolbar with Pop-up Integration */}
+      {/* Enhanced Bulk Operations Toolbar */}
       {selectedAbstracts.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-t-lg p-4">
           <div className="flex items-center justify-between">
@@ -1408,4 +1280,112 @@ export const AbstractReviewModal = ({ abstract, isOpen, onClose, onUpdateStatus 
       </div>
     </div>
   );
-};
+};(() => {
+          showToast(`🔄 Refreshing page data...`, 'info', 2000);
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }, 3000);
+
+      } else {
+        throw new Error(`No abstracts were updated. Expected: ${selected.length}, Successful: ${updateResult.successful}`);
+      }
+
+    } catch (error) {
+      const loadingToasts = document.querySelectorAll('.custom-toast');
+      loadingToasts.forEach(toast => {
+        if (document.body.contains(toast)) {
+          document.body.removeChild(toast);
+        }
+      });
+
+      console.error('❌ Bulk operation error:', error);
+      
+      showToast(
+        `❌ Bulk ${statusText} Failed!\n\n` +
+        `💥 Error: ${error.message}\n\n` +
+        `🔍 Debug Info:\n` +
+        `• Selected: ${selected.length} abstracts\n` +
+        `• IDs: ${selected.map(a => a.id).join(', ')}\n` +
+        `• Status: ${status}\n\n` +
+        `🔧 Troubleshooting:\n` +
+        `• Check internet connection\n` +
+        `• Verify server is running\n` +
+        `• Try refreshing the page\n` +
+        `• Contact administrator if problem persists`,
+        'error',
+        20000
+      );
+    }
+  };
+
+  // Individual status update with email
+  const handleIndividualStatusUpdate = async (abstract, newStatus) => {
+    const statusIcon = newStatus === 'approved' ? '✅' : '❌';
+    const statusText = newStatus.toUpperCase();
+
+    const confirmed = confirm(
+      `${statusIcon} ${statusText} Confirmation\n\n` +
+      `📝 Abstract: ${abstract.title}\n` +
+      `👤 Author: ${abstract.author}\n` +
+      `📧 Email: ${abstract.email}\n` +
+      `🔄 New Status: ${statusText}\n\n` +
+      `This will:\n` +
+      `• Update status in database\n` +
+      `• Send ${newStatus} email to presenter\n\n` +
+      `Continue?`
+    );
+
+    if (!confirmed) {
+      showToast(`❌ ${statusText} Cancelled\n\nNo changes made to "${abstract.title}"`, 'warning', 3000);
+      return;
+    }
+
+    try {
+      const loadingToast = showToast(
+        `🔄 Updating Abstract...\n\n` +
+        `📝 "${abstract.title}"\n` +
+        `🔄 Status: ${statusText}\n` +
+        `⏳ Please wait...`,
+        'info',
+        10000
+      );
+
+      const response = await fetch('/api/abstracts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: abstract.id, 
+          status: newStatus,
+          updatedBy: 'admin',
+          comments: `Individual ${newStatus} operation`
+        })
+      });
+
+      const result = await response.json();
+
+      if (document.body.contains(loadingToast)) {
+        document.body.removeChild(loadingToast);
+      }
+
+      if (result.success) {
+        let emailSent = false;
+        if (newStatus === 'approved') {
+          emailSent = await EmailIntegration.sendApprovalEmail(abstract);
+        } else if (newStatus === 'rejected') {
+          emailSent = await EmailIntegration.sendRejectionEmail(abstract, 'Individual review decision');
+        }
+
+        showToast(
+          `${statusIcon} ${statusText} Successful!\n\n` +
+          `📝 Abstract: "${abstract.title}"\n` +
+          `👤 Author: ${abstract.author}\n` +
+          `📧 Email: ${abstract.email}\n\n` +
+          `💾 Database: ✅ Updated\n` +
+          `📧 Email: ${emailSent ? '✅ Sent' : '❌ Failed'}\n\n` +
+          `🔄 Page will refresh in 2 seconds`,
+          'success',
+          8000
+        );
+
+        setTimeout
