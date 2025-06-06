@@ -620,6 +620,19 @@ export const EnhancedAbstractTable = ({ abstracts, onSelectAbstract, onUpdateSta
     }
   };
 
+    } catch (error) {
+      console.error('Individual update error:', error);
+      showToast(
+        `❌ ${statusText} Failed!\n\n` +
+        `📝 Abstract: "${abstract.title}"\n` +
+        `💥 Error: ${error.message}\n\n` +
+        `🔧 Please try again or contact administrator.`,
+        'error',
+        10000
+      );
+    }
+  };
+
   // Use external handleBulkStatusUpdate if provided, otherwise use internal
   const bulkUpdateFunction = handleBulkStatusUpdate || handleInternalBulkStatusUpdate;
 
