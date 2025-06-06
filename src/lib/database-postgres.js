@@ -172,6 +172,13 @@ export async function getAbstractsByUserId(userId) {
   }
 }
 
+// 🚀 CRITICAL FIX: ADD MISSING getUserAbstracts FUNCTION
+export async function getUserAbstracts(userId) {
+  // This is an alias for getAbstractsByUserId for compatibility with other parts of the system
+  console.log('🔄 getUserAbstracts called for user:', userId);
+  return await getAbstractsByUserId(userId);
+}
+
 // 🚀 CRITICAL FIX: getAllAbstracts with proper field mapping
 export async function getAllAbstracts() {
   const client = await pool.connect();
@@ -646,7 +653,7 @@ export function handleDatabaseError(error, operation) {
 // Export pool for direct access if needed
 export { pool };
 
-// Default export for convenience
+// 🚀 CRITICAL FIX: COMPLETE DEFAULT EXPORT WITH ALL FUNCTIONS INCLUDING getUserAbstracts
 export default {
   // User functions
   createUser,
@@ -656,6 +663,7 @@ export default {
   // Abstract functions
   createAbstract,
   getAbstractsByUserId,
+  getUserAbstracts, // 🚀 CRITICAL: Added missing function
   getAllAbstracts,
   getAbstractById,
   updateAbstractStatus,
