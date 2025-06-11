@@ -163,18 +163,6 @@ export default function AdminDashboard() {
     setShowReviewModal(true)
   }
 
-  const handleSendEmail = (abstract: Abstract) => {
-    console.log('Send email to:', abstract.email)
-    // TODO: Implement email functionality
-    alert(`Email feature - Send to: ${abstract.email}`)
-  }
-
-  const handleDownload = (abstract: Abstract) => {
-    console.log('Download file for:', abstract.id)
-    // TODO: Implement download functionality
-    alert(`Download feature - Abstract ID: ${abstract.id}`)
-  }
-
   const handleLogout = () => {
     document.cookie = 'admin-token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
     router.push('/admin/login')
@@ -407,6 +395,158 @@ Contact administrator if problem persists.`);
     }
   };
 
+  // 🔧 INDIVIDUAL APPROVE FUNCTION
+  const handleIndividualApprove = async (abstractId: string, comments: string = '') => {
+    console.log('🔍 Individual approve called for:', abstractId);
+    
+    try {
+      setUpdatingStatus(abstractId);
+      
+      const finalComments = comments || prompt('Enter approval comments (optional):') || 'Approved by admin';
+      
+      if (confirm(`Approve this abstract?`)) {
+        const result = await handleBulkStatusUpdate([abstractId], 'approved', finalComments);
+        
+        if (result && result.success) {
+          console.log('✅ Individual approve successful');
+          // Auto refresh will happen in handleBulkStatusUpdate
+        }
+      }
+    } catch (error) {
+      console.error('❌ Individual approve failed:', error);
+      alert('Approval failed. Please try again.');
+    } finally {
+      setUpdatingStatus(null);
+    }
+  };
+
+  // 🔧 INDIVIDUAL REJECT FUNCTION  
+  const handleIndividualReject = async (abstractId: string, comments: string = '') => {
+    console.log('🔍 Individual reject called for:', abstractId);
+    
+    try {
+      setUpdatingStatus(abstractId);
+      
+      const finalComments = comments || prompt('Enter rejection reason (required):');
+      
+      if (!finalComments) {
+        alert('❌ Rejection reason is required\n\nPlease provide a reason for rejection.');
+        setUpdatingStatus(null);
+        return;
+      }
+      
+      if (confirm(`Reject this abstract?\n\nReason: ${finalComments}`)) {
+        const result = await handleBulkStatusUpdate([abstractId], 'rejected', finalComments);
+        
+        if (result && result.success) {
+          console.log('✅ Individual reject successful');
+          // Auto refresh will happen in handleBulkStatusUpdate
+        }
+      }
+    } catch (error) {
+      console.error('❌ Individual reject failed:', error);
+      alert('Rejection failed. Please try again.');
+    } finally {
+      setUpdatingStatus(null);
+    }
+  };
+
+  // 🔧 INDIVIDUAL EMAIL FUNCTION (Enhanced)
+  const handleIndividualEmail = async (abstract: Abstract, emailType: string = 'custom') => {
+    console.log('📧 Individual email called for:', abstract.id, emailType);
+    
+    try {
+      let emailData = {
+        to: abstract.email,
+        abstractId: abstract.id,
+        type: emailType,
+        abstract: {
+          title: abstract.title,
+          author: abstract.author,
+          status: abstract.status,
+          abstractNumber: abstract.abstractNumber || `ABST-${abstract.id}`
+        }
+      };
+
+      if (emailType === 'custom') {
+        const subject = prompt('Email Subject:', `Regarding your abstract: ${abstract.title}`);
+        const message = prompt('Email Message:', 'Dear Author,\n\nRegarding your abstract submission...\n\nBest regards,\nAPBMT 2025 Team');
+        
+        if (!subject || !message) {
+          alert('Email cancelled - Subject and message are required');
+          return;
+        }
+        
+        emailData = {
+          ...emailData,
+          subject,
+          message
+        };
+      }
+
+      const response = await fetch('/api/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailData)
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        alert(`✅ Email sent successfully to ${abstract.email}`);
+      } else {
+        throw new Error(result.error || 'Email sending failed');
+      }
+      
+    } catch (error: any) {
+      console.error('📧 Email error:', error);
+      alert(`❌ Email failed: ${error.message}\n\nPlease check email configuration.`);
+    }
+  };
+
+  // 🔧 INDIVIDUAL DOWNLOAD FUNCTION (Enhanced)
+  const handleIndividualDownload = async (abstract: Abstract) => {
+    console.log('📥 Individual download called for:', abstract.id);
+    
+    try {
+      // Check if file exists
+      if (!abstract.abstractNumber && !abstract.id) {
+        alert('❌ Cannot download: Abstract ID missing');
+        return;
+      }
+
+      // Try the download API
+      const response = await fetch(`/api/abstracts/download/${abstract.id}`);
+      
+      if (!response.ok) {
+        // If API doesn't exist, try alternative method
+        if (response.status === 404) {
+          // Fallback: try direct file download if file path is available
+          alert(`📄 Download Info:\n\nAbstract ID: ${abstract.id}\nTitle: ${abstract.title}\nAuthor: ${abstract.author}\n\n⚠️ Download API not configured yet.\nFile will be available after setup.`);
+          return;
+        }
+        throw new Error(`Download failed: ${response.status}`);
+      }
+
+      // Successful download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Abstract_${abstract.id}_${abstract.title.substring(0, 30)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+      
+      console.log('✅ Download successful');
+      
+    } catch (error: any) {
+      console.error('📥 Download error:', error);
+      alert(`❌ Download failed: ${error.message}\n\nPlease contact administrator.`);
+    }
+  };
+
   // 🧪 DEBUG FUNCTION - Add this for testing
   const debugBulkUpdate = async () => {
     console.log('🧪 Running debug test...');
@@ -428,6 +568,10 @@ Contact administrator if problem persists.`);
   if (typeof window !== 'undefined') {
     (window as any).debugBulkUpdate = debugBulkUpdate;
     (window as any).handleBulkStatusUpdate = handleBulkStatusUpdate;
+    (window as any).testIndividualApprove = (id: string) => handleIndividualApprove(id, 'Test approval');
+    (window as any).testIndividualReject = (id: string) => handleIndividualReject(id, 'Test rejection');
+    (window as any).testIndividualEmail = (abstract: Abstract) => handleIndividualEmail(abstract, 'test');
+    (window as any).testIndividualDownload = (abstract: Abstract) => handleIndividualDownload(abstract);
   }
 
   const getStatusColor = (status: string) => {
@@ -540,9 +684,12 @@ Contact administrator if problem persists.`);
           abstracts={abstracts}
           onSelectAbstract={handleSelectAbstract}
           onUpdateStatus={updateStatus}
-          onSendEmail={handleSendEmail}
-          onDownload={handleDownload}
+          onSendEmail={handleIndividualEmail}           // ✅ Fixed
+          onDownload={handleIndividualDownload}         // ✅ Fixed
+          onApprove={handleIndividualApprove}           // ✅ New
+          onReject={handleIndividualReject}             // ✅ New
           handleBulkStatusUpdate={handleBulkStatusUpdate}
+          updatingStatus={updatingStatus}              // ✅ Pass loading state
         />
 
         {/* PRD SECTION 3.4.4 - Abstract Review Modal */}
