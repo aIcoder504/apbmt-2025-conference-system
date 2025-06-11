@@ -39,57 +39,132 @@ export async function GET(request, { params }) {
       );
     }
 
-    // 🎯 FIXED: Files are in public/uploads folder
+    // 🎯 FIXED: Files are in public/uploads/abstracts/sub_xxxxx/ folders
     let filePath;
     
-    // Primary location: public/uploads
-    if (abstract.file_path && abstract.file_path.includes('/uploads/')) {
-      // Path like "/uploads/filename.pdf"
-      filePath = path.join(process.cwd(), 'public', abstract.file_path);
+    // File structure: public/uploads/abstracts/sub_1748639559815_70fe789f/filename.pdf
+    
+    if (abstract.file_path) {
+      // If full path is stored in database
+      if (abstract.file_path.startsWith('/')) {
+        filePath = path.join(process.cwd(), 'public', abstract.file_path);
+      } else {
+        filePath = path.join(process.cwd(), 'public', 'uploads', abstract.file_path);
+      }
     } else if (abstract.file_name) {
-      // Direct filename
-      filePath = path.join(process.cwd(), 'public', 'uploads', abstract.file_name);
-    } else {
-      console.log('❌ No file path or name found');
-      return NextResponse.json(
-        { error: 'File information missing' }, 
-        { status: 404 }
-      );
+      // Need to find the correct subfolder
+      // Pattern: sub_{timestamp}_{hash}
+      const abstractId = abstract.id;
+      const submissionTimestamp = new Date(abstract.submission_date || abstract.submissionDate).getTime();
+      
+      // Try to construct folder name pattern
+      const possibleFolders = [
+        `sub_${abstractId}_${abstract.presenter_name?.toLowerCase().replace(/\s+/g, '')}`,
+        `sub_${submissionTimestamp}_${abstractId}`,
+        `sub_${abstractId}`,
+        abstract.id.toString()
+      ];
+      
+      // Search in abstract subfolders
+      const uploadsPath = path.join(process.cwd(), 'public', 'uploads', 'abstracts');
+      
+      filePath = null;
+      
+      if (fs.existsSync(uploadsPath)) {
+        const subfolders = fs.readdirSync(uploadsPath).filter(item => {
+          const fullPath = path.join(uploadsPath, item);
+          return fs.statSync(fullPath).isDirectory();
+        });
+        
+        console.log('📁 Found subfolders:', subfolders);
+        
+        // Look for abstract ID in folder names
+        for (const folder of subfolders) {
+          if (folder.includes(abstractId) || folder.includes(abstract.id)) {
+            const testPath = path.join(uploadsPath, folder, abstract.file_name);
+            if (fs.existsSync(testPath)) {
+              filePath = testPath;
+              console.log('✅ Found file in subfolder:', folder);
+              break;
+            }
+          }
+        }
+        
+        // If not found by ID, search all subfolders for the filename
+        if (!filePath) {
+          for (const folder of subfolders) {
+            const testPath = path.join(uploadsPath, folder, abstract.file_name);
+            if (fs.existsSync(testPath)) {
+              filePath = testPath;
+              console.log('✅ Found file in subfolder (by filename):', folder);
+              break;
+            }
+          }
+        }
+      }
     }
 
     console.log('📂 Primary file path:', filePath);
 
     // Check if file exists
-    if (!fs.existsSync(filePath)) {
+    if (!filePath || !fs.existsSync(filePath)) {
       console.log('❌ File not found at primary location:', filePath);
       
-      // Try alternative paths in public/uploads
-      const alternativePaths = [
-        path.join(process.cwd(), 'public', 'uploads', abstract.file_name),
-        path.join(process.cwd(), 'public', 'uploads', path.basename(abstract.file_path || abstract.file_name)),
-        path.join(process.cwd(), 'uploads', abstract.file_name), // Fallback to direct uploads
-      ];
-      
+      // Try direct search in all abstract subfolders
+      const uploadsPath = path.join(process.cwd(), 'public', 'uploads', 'abstracts');
       let foundPath = null;
-      for (const altPath of alternativePaths) {
-        console.log('🔍 Trying alternative path:', altPath);
-        if (fs.existsSync(altPath)) {
-          foundPath = altPath;
-          console.log('✅ File found at alternative path:', altPath);
-          break;
+      
+      if (fs.existsSync(uploadsPath)) {
+        const subfolders = fs.readdirSync(uploadsPath);
+        
+        for (const folder of subfolders) {
+          const folderPath = path.join(uploadsPath, folder);
+          if (fs.statSync(folderPath).isDirectory()) {
+            // Check all files in this subfolder
+            const files = fs.readdirSync(folderPath);
+            
+            for (const file of files) {
+              // Match by filename or partial filename
+              if (file === abstract.file_name || 
+                  file.includes(abstract.file_name) ||
+                  abstract.file_name.includes(file)) {
+                foundPath = path.join(folderPath, file);
+                console.log('✅ Found file by search:', foundPath);
+                break;
+              }
+            }
+            
+            if (foundPath) break;
+          }
         }
       }
       
       if (!foundPath) {
-        console.log('❌ File not found in any location. Tried:', alternativePaths);
+        console.log('❌ File not found in any abstract subfolder');
+        
+        // List available files for debugging
+        const availableFiles = [];
+        if (fs.existsSync(uploadsPath)) {
+          const subfolders = fs.readdirSync(uploadsPath);
+          for (const folder of subfolders) {
+            const folderPath = path.join(uploadsPath, folder);
+            if (fs.statSync(folderPath).isDirectory()) {
+              const files = fs.readdirSync(folderPath);
+              availableFiles.push({ folder, files });
+            }
+          }
+        }
+        
         return NextResponse.json(
           { 
             error: 'File not found on server', 
-            details: `File exists in database but missing from public/uploads folder`,
+            details: `File exists in database but missing from uploads folder`,
             file_name: abstract.file_name,
             file_path: abstract.file_path,
-            expected_location: 'public/uploads/',
-            tried_paths: alternativePaths
+            abstract_id: abstract.id,
+            expected_location: 'public/uploads/abstracts/sub_xxxxx/',
+            available_files: availableFiles,
+            search_attempted: true
           }, 
           { status: 404 }
         );
