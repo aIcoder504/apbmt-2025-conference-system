@@ -39,42 +39,40 @@ export async function GET(request, { params }) {
       );
     }
 
-    // Determine file path - handle multiple possible locations
+    // 🎯 FIXED: Files are in public/uploads folder
     let filePath;
     
-    // Option 1: Relative path from project root
-    if (abstract.file_path.startsWith('/uploads/')) {
-      filePath = path.join(process.cwd(), 'uploads', path.basename(abstract.file_path));
-    }
-    // Option 2: Absolute path
-    else if (path.isAbsolute(abstract.file_path)) {
-      filePath = abstract.file_path;
-    }
-    // Option 3: Public uploads
-    else if (abstract.file_path.startsWith('uploads/')) {
-      filePath = path.join(process.cwd(), abstract.file_path);
-    }
-    // Option 4: Default to uploads folder
-    else {
-      filePath = path.join(process.cwd(), 'uploads', abstract.file_name);
+    // Primary location: public/uploads
+    if (abstract.file_path && abstract.file_path.includes('/uploads/')) {
+      // Path like "/uploads/filename.pdf"
+      filePath = path.join(process.cwd(), 'public', abstract.file_path);
+    } else if (abstract.file_name) {
+      // Direct filename
+      filePath = path.join(process.cwd(), 'public', 'uploads', abstract.file_name);
+    } else {
+      console.log('❌ No file path or name found');
+      return NextResponse.json(
+        { error: 'File information missing' }, 
+        { status: 404 }
+      );
     }
 
-    console.log('📂 Checking file path:', filePath);
+    console.log('📂 Primary file path:', filePath);
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
-      console.log('❌ File not found on server:', filePath);
+      console.log('❌ File not found at primary location:', filePath);
       
-      // Try alternative paths
+      // Try alternative paths in public/uploads
       const alternativePaths = [
         path.join(process.cwd(), 'public', 'uploads', abstract.file_name),
-        path.join(process.cwd(), 'uploads', abstract.file_name),
-        path.join(process.cwd(), abstract.file_name),
-        path.join(process.cwd(), 'public', abstract.file_name)
+        path.join(process.cwd(), 'public', 'uploads', path.basename(abstract.file_path || abstract.file_name)),
+        path.join(process.cwd(), 'uploads', abstract.file_name), // Fallback to direct uploads
       ];
       
       let foundPath = null;
       for (const altPath of alternativePaths) {
+        console.log('🔍 Trying alternative path:', altPath);
         if (fs.existsSync(altPath)) {
           foundPath = altPath;
           console.log('✅ File found at alternative path:', altPath);
@@ -87,9 +85,11 @@ export async function GET(request, { params }) {
         return NextResponse.json(
           { 
             error: 'File not found on server', 
-            details: `Abstract has file reference but file is missing`,
+            details: `File exists in database but missing from public/uploads folder`,
             file_name: abstract.file_name,
-            expected_path: filePath
+            file_path: abstract.file_path,
+            expected_location: 'public/uploads/',
+            tried_paths: alternativePaths
           }, 
           { status: 404 }
         );
